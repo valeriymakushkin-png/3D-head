@@ -29,7 +29,7 @@ const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "
 /**
  * POST: starts an HD twin (Pro+). Creates the avatar + capture rows and
  * returns one signed upload URL per capture (direct browser → storage, the
- * app server never proxies face data). Photos are purged after 24 h.
+ * app server never proxies face data). Photos are purged within 48 h.
  */
 export const POST = route(async (req: Request) => {
   const session = await getSession();

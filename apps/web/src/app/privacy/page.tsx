@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "Privacy" };
 
 const sections: Array<[string, string]> = [
   ["What we process", "Instant Twins are built entirely in your browser: your photos, facial landmarks and the resulting 3D model stay on your device (IndexedDB) unless you choose to sync or order an HD Twin."],
-  ["HD Twins", "If you order an HD Twin, your capture photos are uploaded over TLS to encrypted private storage, processed by our GPU service, and permanently deleted within 24 hours. The resulting model is stored privately and served only through short-lived signed links."],
+  ["HD Twins", "If you order an HD Twin, your capture photos are uploaded over TLS to encrypted private storage, processed by our GPU service, and permanently deleted within 48 hours. The resulting model is stored privately and served only through short-lived signed links."],
   ["Biometric data", "A 3D face model can be biometric data (GDPR Art. 9, BIPA, CCPA). We process it only to provide the service you asked for, with your explicit consent at capture time. We never use your face to train models, never sell it, and never use it for identification."],
   ["AI Stylist", "When you chat with the AI Stylist we send your text and numeric measurements (face-shape ratios, skin-tone category, current look) to our AI provider — never your photos. Providers are contractually barred from training on this data."],
   ["Accounts & payments", "Signing in with Telegram shares your Telegram id and public name. Payments are handled by Stripe or Telegram; we never see card details."],

@@ -5,7 +5,7 @@ Texas CUBI). The architecture minimises what we ever hold.
 
 ## Data minimisation by design
 * **Instant Twins never leave the device** (IndexedDB). Photos, landmarks, mesh, texture stay local.
-* **HD Twins**: photos go browser → private bucket via one-time signed upload URLs (the app server never proxies face data), are processed once, and are **hard-deleted within 24 h** by `/api/cron/purge` (`captures.purge_after`).
+* **HD Twins**: photos go browser → private bucket via one-time signed upload URLs (the app server never proxies face data), are processed once, and are **hard-deleted within 48 h** (24 h TTL + daily cron) by `/api/cron/purge` (`captures.purge_after`).
 * **LLM calls carry no images** — only numeric measurements, categorical skin tone and look JSON. No training on customer data (provider terms).
 * Avatar deletion erases storage objects immediately and nulls derived fields.
 
@@ -39,6 +39,6 @@ Texas CUBI). The architecture minimises what we ever hold.
 - [ ] DPIA for biometric processing; explicit consent screen before capture (EU, IL, TX, WA)
 - [ ] DPAs with Supabase, Vercel, Anthropic, Modal, Stripe
 - [ ] Data residency: EU project (fra1 / eu-central-1) for EU users
-- [ ] Retention policy published (24 h captures, 30 d anonymous users, avatar until deletion)
+- [ ] Retention policy published (≤ 48 h captures, 30 d anonymous users, avatar until deletion)
 - [ ] Pen test (web + Mini App) and dependency audit in CI (`npm audit --omit=dev` = 0 today)
 - [ ] FLAME commercial licence; replace CC-BY template with owned scan

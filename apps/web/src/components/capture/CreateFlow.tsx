@@ -92,7 +92,7 @@ export function CreateFlow({ studioPath = "/studio" }: { studioPath?: string }) 
               <label className="glass-soft mt-4 flex cursor-pointer items-center justify-between gap-4 rounded-[22px] px-5 py-4">
                 <span>
                   <span className="block text-[14px] font-medium text-mist-100">Also build an HD Twin in the cloud</span>
-                  <span className="mt-0.5 block text-[12px] leading-5 text-mist-400">GPU-fitted head model and a sharper skin texture. Photos are uploaded encrypted and deleted within 24 hours.</span>
+                  <span className="mt-0.5 block text-[12px] leading-5 text-mist-400">GPU-fitted head model and a sharper skin texture. Photos are uploaded encrypted and deleted within 48 hours.</span>
                 </span>
                 <input type="checkbox" checked={hd} onChange={(e) => setHd(e.target.checked)} className="size-5 accent-mist-50" />
               </label>
@@ -101,7 +101,7 @@ export function CreateFlow({ studioPath = "/studio" }: { studioPath?: string }) 
               <IconShield size={18} className="mt-0.5 shrink-0 text-ok-400" />
               <p>
                 Private by design: your photos are processed in the browser and never uploaded. Only if you later choose an HD twin do they go to our GPU cloud — encrypted,
-                and deleted within 24 hours.
+                and deleted within 48 hours.
               </p>
             </div>
           </motion.section>

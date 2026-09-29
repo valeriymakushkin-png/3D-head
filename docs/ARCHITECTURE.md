@@ -48,7 +48,7 @@
 | Geometry | Template head (scan) → ridge-affine + Gaussian-RBF warp through 468 fused landmarks | FLAME fitted jointly to all views (landmarks + silhouette + photometric) |
 | Texture | 2K atlas, projected from every view with visibility, facing³, skin-segmentation weights and per-view exposure gain | 2K atlas, SH-delit, Laplacian multi-band blended, per-vertex albedo fill |
 | Time | 5–15 s on a phone | 40–90 GPU-s, async, Telegram notification |
-| Privacy | Photos never leave the device | Photos hard-deleted ≤ 24 h |
+| Privacy | Photos never leave the device | Photos hard-deleted ≤ 48 h |
 | Cost to us | $0 | ≈ $0.012 per twin (L4 @ ~$0.80/h) |
 
 Why: the "aha" (seeing *yourself* in 3D with a new haircut) must happen before

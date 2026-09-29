@@ -6,9 +6,10 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /**
- * Vercel Cron (hourly): enforces the privacy promise — raw capture photos
- * are hard-deleted 24 h after upload — and garbage-collects anonymous users
- * that never came back (30 days, no avatars).
+ * Vercel Cron (daily — Vercel Hobby only allows daily crons): enforces the
+ * privacy promise — raw capture photos are hard-deleted within 48 h (24 h
+ * TTL + at most a day until the next run) — and garbage-collects anonymous
+ * users that never came back (30 days, no avatars).
  */
 export async function GET(req: Request) {
   if (!features.backend() || !env().CRON_SECRET || req.headers.get("authorization") !== `Bearer ${env().CRON_SECRET}`) {

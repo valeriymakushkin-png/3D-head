@@ -26,7 +26,7 @@ JSON out (except the SSE stylist). Auth = session cookie `tm_session` **or**
 | `POST /api/webhooks/stripe` | Stripe signature | subscription lifecycle (idempotent) |
 | `POST /api/telegram/webhook` | secret-token header | `/start`, `pre_checkout_query`, `successful_payment` |
 | `POST /api/webhooks/reconstruct` | HMAC `x-twinme-signature` | GPU worker → user notification |
-| `GET /api/cron/purge` | `Bearer CRON_SECRET` | delete captures > 24 h, GC anonymous users |
+| `GET /api/cron/purge` | `Bearer CRON_SECRET` | delete captures > 24 h (daily), GC anonymous users |
 
 ## Stylist SSE protocol (`lib/ai/protocol.ts`)
 

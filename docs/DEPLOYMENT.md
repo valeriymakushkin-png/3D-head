@@ -37,8 +37,16 @@ For the worker use the **session pooler** connection string as `DATABASE_URL`.
    `ANTHROPIC_API_KEY` (+ `STYLIST_MODEL=claude-opus-5-5`, `STYLIST_EFFORT=low`),
    Stripe keys + price ids, `RECON_WEBHOOK_SECRET` (≥ 32 chars), `CRON_SECRET`,
    optional `OPENAI_API_KEY` + `OPENAI_FALLBACK_MODEL`, `RECON_TRIGGER_URL` + `RECON_TRIGGER_TOKEN`.
-3. `vercel.json` already configures the hourly purge cron (Vercel sends `Authorization: Bearer $CRON_SECRET`) and function durations. Region `fra1` (EU data residency; change as needed).
+3. `apps/web/vercel.json` already configures the daily purge cron (Vercel sends `Authorization: Bearer $CRON_SECRET`) and function durations. Region `fra1` (EU data residency; change as needed). Hobby only allows daily crons; on Pro you can switch it to hourly (`17 * * * *`) for a ≤ 25 h deletion window.
 4. Deploy. Check `https://<host>/api/health`.
+
+### Troubleshooting
+| Symptom | Cause / fix |
+|---|---|
+| "No Next.js version detected" / build can't find `package.json` | Root Directory isn't `apps/web` (Project → Settings → Build and Deployment → Root Directory), then redeploy. The app lives in a subfolder, and `vercel.json` there is only read with that root. |
+| "Hobby accounts are limited to daily cron jobs" | Old commit with the hourly cron — pull the latest branch. |
+| Site loads but `/api/*` returns 500 | `SESSION_SECRET` not set (≥ 32 chars). Production fails closed without it by design. Redeploy after adding env vars. |
+| Accounts / AI Stylist / payments disabled | The matching env vars are missing — the 3D studio still works without them. |
 
 ## 4. Telegram
 ```bash
