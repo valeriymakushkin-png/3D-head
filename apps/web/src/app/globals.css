@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   TwinMe design tokens
+   Monochrome graphite + one iridescent accent reserved for AI.
+   ========================================================================== */
+@theme {
+  --color-ink-950: #050506;
+  --color-ink-900: #09090b;
+  --color-ink-850: #0e0f12;
+  --color-ink-800: #141519;
+  --color-ink-700: #1c1e23;
+  --color-ink-600: #272a31;
+  --color-ink-500: #363a43;
+  --color-mist-50: #f6f6f8;
+  --color-mist-100: #ececf0;
+  --color-mist-200: #d6d7dd;
+  --color-mist-300: #b4b6bf;
+  --color-mist-400: #8d909a;
+  --color-mist-500: #686b75;
+  --color-iris-200: #dde3ff;
+  --color-iris-300: #c2ccff;
+  --color-iris-400: #9fadff;
+  --color-iris-500: #7d8bff;
+  --color-aura-300: #ffd9bd;
+  --color-aura-400: #f4bf96;
+  --color-ok-400: #7ee2b0;
+  --color-warn-400: #ffcf70;
+  --color-err-400: #ff8a8a;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
+  --font-display: var(--font-inter-tight), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument), ui-serif, Georgia, serif;
+
+  --radius-glass: 22px;
+  --radius-pill: 999px;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --animate-shimmer: shimmer 2.4s linear infinite;
+  --animate-aura: aura 6s linear infinite;
+  --animate-breathe: breathe 4.8s ease-in-out infinite;
+
+  @keyframes shimmer {
+    from { background-position: -200% 0; }
+    to { background-position: 200% 0; }
+  }
+  @keyframes aura {
+    to { --aura-angle: 360deg; }
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.04); }
+  }
+}
+
+@property --aura-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+:root {
+  color-scheme: dark;
+  --tg-safe-top: 0px;
+  --tg-safe-bottom: 0px;
+}
+
+html,
+body {
+  background: var(--color-ink-950);
+  color: var(--color-mist-100);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  overscroll-behavior: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-iris-400) 45%, transparent);
+}
+
+/* --- Glass -------------------------------------------------------------- */
+@utility glass {
+  background: linear-gradient(180deg, rgb(28 30 36 / 0.62), rgb(16 17 21 / 0.58));
+  @supports not (backdrop-filter: blur(1px)) {
+    background: rgb(18 19 23 / 0.94);
+  }
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    inset 0 -1px 0 rgb(0 0 0 / 0.25),
+    0 24px 60px -24px rgb(0 0 0 / 0.7);
+}
+
+@utility glass-soft {
+  background: rgb(255 255 255 / 0.045);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgb(255 255 255 / 0.06);
+}
+
+/* Iridescent ring reserved for AI affordances. */
+@utility ai-ring {
+  position: relative;
+  isolation: isolate;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--aura-angle), #9fadff, #f4bf96, #c2ccff, #7ee2d0, #9fadff);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: var(--animate-aura);
+    z-index: -1;
+  }
+}
+
+@utility text-shimmer {
+  background: linear-gradient(90deg, var(--color-mist-400) 0%, var(--color-mist-50) 50%, var(--color-mist-400) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: var(--animate-shimmer);
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Film grain + vignette over the 3D stage (pure CSS, zero GPU cost). */
+@utility stage-vignette {
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 38%, transparent 55%, rgb(0 0 0 / 0.55) 100%);
+}
+
+@utility grain {
+  pointer-events: none;
+  opacity: 0.06;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.9'/></svg>");
+}
+
+/* Scroll reveal (see components/landing/Reveal.tsx) */
+.reveal-armed {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.9s var(--ease-out-expo),
+    transform 0.9s var(--ease-out-expo);
+}
+.reveal-armed.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,16 @@
+.DS_Store
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+services/reconstruct/models/
+services/reconstruct/flame/
+
+# env
+.env
+.env.*.local
+.env.local
