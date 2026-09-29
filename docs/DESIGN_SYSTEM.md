@@ -10,7 +10,7 @@ floats over a cinematic stage, with one iridescent accent reserved for AI.
 4. **Real light.** Studio lighting on the avatar, soft shadows and inner highlights on glass, grain + vignette for film.
 5. **Few words.** Labels ≤ 3 words; explanations only where a decision is made.
 
-## Tokens (`apps/web/src/app/globals.css`, Tailwind v4 `@theme`)
+## Tokens (`src/app/globals.css`, Tailwind v4 `@theme`)
 
 | Token | Value | Use |
 |---|---|---|

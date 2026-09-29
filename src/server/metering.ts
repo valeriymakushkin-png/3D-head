@@ -16,8 +16,11 @@ export async function meter(
   input: { type: MeterType; avatarId: string | null; settings: unknown; source?: "manual" | "stylist" | "glow_up" },
 ): Promise<{ remaining: number | null }> {
   if (!features.backend()) {
-    if (env().NODE_ENV === "production") throw new HttpError(503, "backend_unavailable");
-    return { remaining: null }; // local dev: unmetered
+    // No database to count in (local dev or a demo deploy). On-device looks and
+    // Glow Ups cost nothing to serve, so they stay available; paid AI calls
+    // are never served unmetered in production.
+    if (env().NODE_ENV === "production" && input.type === "stylist") throw new HttpError(503, "backend_unavailable");
+    return { remaining: null };
   }
   const { data, error } = await db().rpc("consume_transformation", {
     p_user: session.userId,

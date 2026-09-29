@@ -6,9 +6,15 @@ import { z } from "zod";
  * gracefully when unconfigured (local dev without Supabase/Stripe still runs
  * the full on-device product); nothing silently pretends to work.
  */
+/** Vercel exposes the deployment's own domain, so a zero-config deploy still builds correct absolute links. */
+function defaultSiteUrl(): string {
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  return host ? `https://${host}` : "http://localhost:3000";
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  NEXT_PUBLIC_SITE_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_SITE_URL: z.string().url().default(defaultSiteUrl()),
 
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
@@ -54,9 +60,13 @@ export function env(): Env {
     if (!parsed.success) {
       throw new Error(`Invalid server environment: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     }
-    // Fail closed on every call until configured (validate before caching).
-    if (parsed.data.NODE_ENV === "production" && !parsed.data.SESSION_SECRET) {
-      throw new Error("SESSION_SECRET is required in production");
+    // With a database, sessions guard real accounts: fail closed on every
+    // call until SESSION_SECRET is configured (validate before caching).
+    // Without one (demo deploy) there is nothing to protect, and sessions use
+    // a random per-instance key (see session.ts).
+    const hasBackend = !!(parsed.data.NEXT_PUBLIC_SUPABASE_URL && parsed.data.SUPABASE_SERVICE_ROLE_KEY);
+    if (parsed.data.NODE_ENV === "production" && hasBackend && !parsed.data.SESSION_SECRET) {
+      throw new Error("SESSION_SECRET is required in production when Supabase is configured");
     }
     cached = parsed.data;
   }

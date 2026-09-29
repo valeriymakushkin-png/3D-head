@@ -12,7 +12,7 @@ you see is rendered live at 60 fps.
 
 | | |
 |---|---|
-| `apps/web` | Next.js 15 app: landing (live 3D hero), capture (guided scan / photos / video), **on-device Instant Twin reconstruction**, studio (R3F), AI Stylist, Glow Up, Telegram Mini App, API (auth, metering, billing, webhooks) |
+| `/` (repo root) | Next.js 15 app (`src/`, `public/`): landing (live 3D hero), capture (guided scan / photos / video), **on-device Instant Twin reconstruction**, studio (R3F), AI Stylist, Glow Up, Telegram Mini App, API (auth, metering, billing, webhooks) |
 | `services/reconstruct` | Python GPU worker for **HD Twins**: multi-view FLAME fitting (PyTorch3D), delit multi-band texture baking, GLB export; Modal scale-to-zero deployment |
 | `supabase` | Postgres schema, RLS, atomic metering / queue functions, private buckets |
 | `docs` | [Architecture](docs/ARCHITECTURE.md) · [Pipeline](docs/PIPELINE.md) · [Database](docs/DATABASE.md) · [API](docs/API.md) · [UI tree](docs/UI.md) · [Design system](docs/DESIGN_SYSTEM.md) · [Telegram](docs/TELEGRAM.md) · [Roadmap](docs/ROADMAP.md) · [Scaling to 1M](docs/SCALING.md) · [Security](docs/SECURITY.md) · [Deployment](docs/DEPLOYMENT.md) |
@@ -20,7 +20,6 @@ you see is rendered live at 60 fps.
 ## Quick start
 
 ```bash
-cd apps/web
 npm install
 npm run dev        # http://localhost:3000
 ```
@@ -38,7 +37,7 @@ the AI Stylist, metering and payments (see `.env.example`).
 ## Tests
 
 ```bash
-cd apps/web && npm test && npm run typecheck && npm run build
+npm test && npm run typecheck && npm run build
 cd services/reconstruct && pip install -e .[dev] && pytest -q
 ```
 

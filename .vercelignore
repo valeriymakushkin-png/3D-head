@@ -1,0 +1,4 @@
+# Only the Next.js app (repo root) is deployed to Vercel.
+services
+supabase
+docs

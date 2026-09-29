@@ -15,7 +15,7 @@ from twinme_recon.pipeline.frames import Frame
 
 MODELS = Path(__file__).resolve().parents[2] / "models"
 
-# (yaw, pitch) bins — must match apps/web/src/lib/recon/poses.ts
+# (yaw, pitch) bins — must match src/lib/recon/poses.ts
 POSE_BINS = {
     "front": (0, 0),
     "left30": (28, 0),

@@ -1,4 +1,4 @@
-"""Face analysis — ports of apps/web/src/lib/style/analysis.ts and the
+"""Face analysis — ports of src/lib/style/analysis.ts and the
 segmentation-based hair/beard reader in lib/recon/analyze.ts. Output matches
 the web's FaceAnalysisSchema exactly."""
 

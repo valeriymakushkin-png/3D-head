@@ -1,6 +1,17 @@
 .DS_Store
 *.log
 
+# Node / Next.js (web app at the repo root)
+node_modules
+.next
+out
+*.tsbuildinfo
+next-env.d.ts
+coverage
+.vercel
+# self-hosted MediaPipe runtime + models, copied/downloaded by scripts/copy-mediapipe.mjs
+public/mediapipe
+
 # Python
 __pycache__/
 *.pyc
@@ -12,5 +23,5 @@ services/reconstruct/flame/
 
 # env
 .env
-.env.*.local
 .env.local
+.env*.local

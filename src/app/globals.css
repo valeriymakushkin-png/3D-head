@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* The web app is the repo root; don't scan the Python worker, SQL or docs for class names. */
+@source not "../../services";
+@source not "../../supabase";
+@source not "../../docs";
 
 /* ==========================================================================
    TwinMe design tokens

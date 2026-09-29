@@ -1,6 +1,6 @@
 # API
 
-All endpoints are Next.js route handlers under `apps/web/src/app/api`. JSON in,
+All endpoints are Next.js route handlers under `src/app/api`. JSON in,
 JSON out (except the SSE stylist). Auth = session cookie `tm_session` **or**
 `Authorization: Bearer <jwt>` (Telegram). Errors: `{ "error": code, "message"? }`.
 

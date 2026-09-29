@@ -10,7 +10,6 @@ Anthropic API key; (HD) Modal account + FLAME licence.
 
 ## 1. Local development
 ```bash
-cd apps/web
 cp .env.example .env.local        # everything optional locally
 npm install
 npm run dev                       # copies MediaPipe WASM/models into public/, starts :3000
@@ -30,22 +29,24 @@ Copy `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`, `service_role` key → `SUPAB
 For the worker use the **session pooler** connection string as `DATABASE_URL`.
 
 ## 3. Web on Vercel
-1. Import the repo, **Root Directory = `apps/web`**, framework Next.js.
-2. Environment (Production):
+1. Import the repo. Leave **Root Directory empty** (the Next.js app is the repo root; Vercel detects it automatically). Make sure **Settings → Environments → Production → Branch Tracking** points at the branch you push to (`main`).
+2. Environment (Production). **None of these are required for the site to work** — with no env vars it deploys as a fully working on-device demo (scan, twin, studio, Glow Up, exports). Add them to turn on accounts, AI and payments; once Supabase is set, `SESSION_SECRET` becomes mandatory:
    `NEXT_PUBLIC_SITE_URL`, `SESSION_SECRET` (`openssl rand -base64 48`), Supabase vars,
    `TELEGRAM_BOT_TOKEN`, `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`,
    `ANTHROPIC_API_KEY` (+ `STYLIST_MODEL=claude-opus-5-5`, `STYLIST_EFFORT=low`),
    Stripe keys + price ids, `RECON_WEBHOOK_SECRET` (≥ 32 chars), `CRON_SECRET`,
    optional `OPENAI_API_KEY` + `OPENAI_FALLBACK_MODEL`, `RECON_TRIGGER_URL` + `RECON_TRIGGER_TOKEN`.
-3. `apps/web/vercel.json` already configures the daily purge cron (Vercel sends `Authorization: Bearer $CRON_SECRET`) and function durations. Region `fra1` (EU data residency; change as needed). Hobby only allows daily crons; on Pro you can switch it to hourly (`17 * * * *`) for a ≤ 25 h deletion window.
+3. `vercel.json` already configures the daily purge cron (Vercel sends `Authorization: Bearer $CRON_SECRET`) and function durations. Region `fra1` (EU data residency; change as needed). Hobby only allows daily crons; on Pro you can switch it to hourly (`17 * * * *`) for a ≤ 25 h deletion window.
 4. Deploy. Check `https://<host>/api/health`.
 
 ### Troubleshooting
 | Symptom | Cause / fix |
 |---|---|
-| "No Next.js version detected" / build can't find `package.json` | Root Directory isn't `apps/web` (Project → Settings → Build and Deployment → Root Directory), then redeploy. The app lives in a subfolder, and `vercel.json` there is only read with that root. |
+| Deployment "completes" in seconds and the site shows 404 | Vercel isn't building Next.js. Framework Preset must be **Next.js** and Root Directory **empty** (Settings → Build and Deployment), then redeploy. |
+| "The specified Root Directory does not exist" | Root Directory is still set to the old `apps/web` — clear it. |
+| New pushes only create *Preview* deployments | Production branch ≠ the branch you push. Push to `main` or change Branch Tracking. Previews are behind Vercel login by default (Deployment Protection). |
 | "Hobby accounts are limited to daily cron jobs" | Old commit with the hourly cron — pull the latest branch. |
-| Site loads but `/api/*` returns 500 | `SESSION_SECRET` not set (≥ 32 chars). Production fails closed without it by design. Redeploy after adding env vars. |
+| Site loads but `/api/*` returns 500 | Supabase is configured but `SESSION_SECRET` (≥ 32 chars) is not — production fails closed by design. Redeploy after adding env vars. |
 | Accounts / AI Stylist / payments disabled | The matching env vars are missing — the 3D studio still works without them. |
 
 ## 4. Telegram

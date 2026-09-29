@@ -55,6 +55,6 @@ export async function* streamStylist(req: StylistRequest, signal?: AbortSignal):
 
 export async function fetchGlowUpNarrative(body: { analysis: unknown; before: unknown; after: unknown; patch: LookPatch }, signal?: AbortSignal) {
   const res = await apiFetch("/api/glow-up", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
-  if (!res.ok) return null;
+  if (!res.ok || res.status === 204) return null;
   return (await res.json()) as { headline: string; rationale: string[] };
 }

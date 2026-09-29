@@ -1,4 +1,4 @@
-"""Head rig — a faithful port of apps/web/src/lib/head/rig.ts (buildRig /
+"""Head rig — a faithful port of src/lib/head/rig.ts (buildRig /
 estimateHairline) so HD twins load in the studio exactly like Instant twins.
 Convention: metres, +Y up, +Z out of the face, +X subject's left; origin =
 cranium centre."""

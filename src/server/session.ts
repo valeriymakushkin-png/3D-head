@@ -22,7 +22,9 @@ let devSecret: Uint8Array | null = null;
 function secret(): Uint8Array {
   const s = env().SESSION_SECRET;
   if (s) return new TextEncoder().encode(s);
-  // Dev only (env() refuses to boot production without SESSION_SECRET).
+  // No backend configured (local dev or a demo deploy): env() refuses to run
+  // with a database but no SESSION_SECRET. A random per-instance key is safe
+  // here — it can't be forged, and sessions carry no stored data.
   devSecret ??= crypto.getRandomValues(new Uint8Array(32));
   return devSecret;
 }

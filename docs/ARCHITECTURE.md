@@ -117,21 +117,21 @@ fidelity for users who've already converted.
 ## 7. Repository layout
 
 ```
-apps/web/                     Next.js 15 app (landing, capture, studio, Telegram, API)
-  src/app/                    routes (App Router) + api/ route handlers
-  src/components/three/       R3F scene: Avatar, HeadMesh, StrandMesh, RenderPipeline, CameraRig, Stage
-  src/components/studio/      Studio UI: TopBar, PreviewRail, StyleDock, StylistPanel, GlowUp, Sheets
-  src/components/capture/     CreateFlow, GuidedScan, UploadPhotos
-  src/components/landing/     Hero (live 3D), Reveal
-  src/components/telegram/    TgApp shell
-  src/lib/hair/               strand generator, regions, SDF, style presets
-  src/lib/head/               rig (anatomical frame), head asset loaders
-  src/lib/recon/              MediaPipe, capture, fusion, warp, GPU texture bake, analysis, vault
-  src/lib/three/              skin/hair materials, glasses, accessories, masks, lighting
-  src/lib/style/              face analysis + style engine
-  src/lib/engine/             worker protocol/client, thumbnails, previews, scene bus
-  src/server/                 env, db, session, telegram, billing, metering, AI (server-only)
-  public/models/template/     template head scan (CC BY 3.0) + auto-generated rig.json
+(repo root)                   Next.js 15 app (landing, capture, studio, Telegram, API) — deploys to Vercel as-is
+src/app/                      routes (App Router) + api/ route handlers
+src/components/three/         R3F scene: Avatar, HeadMesh, StrandMesh, RenderPipeline, CameraRig, Stage
+src/components/studio/        Studio UI: TopBar, PreviewRail, StyleDock, StylistPanel, GlowUp, Sheets
+src/components/capture/       CreateFlow, GuidedScan, UploadPhotos
+src/components/landing/       Hero (live 3D), Reveal
+src/components/telegram/      TgApp shell
+src/lib/hair/                 strand generator, regions, SDF, style presets
+src/lib/head/                 rig (anatomical frame), head asset loaders
+src/lib/recon/                MediaPipe, capture, fusion, warp, GPU texture bake, analysis, vault
+src/lib/three/                skin/hair materials, glasses, accessories, masks, lighting
+src/lib/style/                face analysis + style engine
+src/lib/engine/               worker protocol/client, thumbnails, previews, scene bus
+src/server/                   env, db, session, telegram, billing, metering, AI (server-only)
+public/models/template/       template head scan (CC BY 3.0) + auto-generated rig.json
 services/reconstruct/         Python GPU worker (FLAME fitting, texture, GLB) + Modal app
 supabase/                     migrations (schema, RLS, functions, buckets), local config
 docs/                         this documentation

@@ -12,7 +12,8 @@ const instrument = Instrument_Serif({
   display: "swap",
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://twinme.ai";
+const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || (vercelHost ? `https://${vercelHost}` : "https://twinme.ai");
 
 // Per-request CSP nonces (see middleware.ts) require dynamic rendering.
 export const dynamic = "force-dynamic";

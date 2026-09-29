@@ -15,9 +15,10 @@ const Input = z.object({ analysis: FaceAnalysisSchema, before: LookSchema, after
 
 /** Natural-language rationale for a Glow Up (the look itself is metered in /api/transformations). */
 export const POST = route(async (req: Request) => {
+  // AI not configured: the deterministic Glow Up stands on its own.
+  if (!env().ANTHROPIC_API_KEY) return new Response(null, { status: 204 });
   const session = await getSession();
   if (!session) throw new HttpError(401, "unauthorized");
-  if (!env().ANTHROPIC_API_KEY) throw new HttpError(503, "unavailable");
   await rateLimit(`glowup:${session.userId}`, 10, 60);
   const input = await body(req, Input, 32_000);
   const res = await narrateGlowUp(input);
