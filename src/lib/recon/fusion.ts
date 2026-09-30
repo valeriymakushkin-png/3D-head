@@ -15,6 +15,12 @@ import { type Similarity, applySimilarity, similarityAlign } from "@/lib/recon/l
 const STABLE = [1, 4, 6, 168, 197, 33, 133, 263, 362, 61, 291, 152, 10, 199, 2, 98, 327];
 const N_LM = 478;
 const IRIS_DIAMETER_M = 0.0117;
+/**
+ * Focal length assumed for photos, as a fraction of the image's long side
+ * (phone front cameras are ~70–85° diagonal). It sets how strongly a selfie's
+ * perspective is undone when photos are projected onto the head.
+ */
+export const PHONE_FOCAL = 0.75;
 
 export interface ViewLandmarks {
   /** 478 × 3 normalised (x, y, z) from MediaPipe. */

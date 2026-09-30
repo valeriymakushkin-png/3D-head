@@ -25,8 +25,20 @@ export const SYNTH_SCALE = [0.93, 1.04, 1] as const;
  * production landmarker on each render. Reconstruction must recover the
  * reshaped proportions, not the template's.
  */
-/** Reshaped template head in a neutral "selfie" setup (720×960, 50° FOV). */
-function syntheticRig(template: HeadAsset) {
+/** The reshaped template (narrower, longer face) as a textured mesh. */
+function reshapedTemplate(template: HeadAsset) {
+  const geo = template.geometry.clone();
+  const pos = geo.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    pos.setX(i, pos.getX(i) * SYNTH_SCALE[0]);
+    pos.setY(i, pos.getY(i) * SYNTH_SCALE[1]);
+  }
+  geo.computeVertexNormals();
+  return new Mesh(geo, new MeshStandardMaterial({ map: template.albedo, roughness: 0.6 }));
+}
+
+/** A head mesh (template space, metres) in a neutral "selfie" setup: 720×960, phone-like camera. */
+function syntheticRig(template: HeadAsset, head?: Mesh, distance = 0.34) {
   const W = 720,
     H = 960;
   const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -35,14 +47,7 @@ function syntheticRig(template: HeadAsset) {
   renderer.outputColorSpace = SRGBColorSpace;
   const scene = new Scene();
   scene.background = new Color("#6d7278");
-  const geo = template.geometry.clone();
-  const pos = geo.getAttribute("position");
-  for (let i = 0; i < pos.count; i++) {
-    pos.setX(i, pos.getX(i) * SYNTH_SCALE[0]);
-    pos.setY(i, pos.getY(i) * SYNTH_SCALE[1]);
-  }
-  geo.computeVertexNormals();
-  const mesh = new Mesh(geo, new MeshStandardMaterial({ map: template.albedo, roughness: 0.6 }));
+  const mesh = head ?? reshapedTemplate(template);
   scene.add(mesh);
   scene.add(new AmbientLight(0xffffff, 1.1));
   const key = new DirectionalLight(0xffffff, 1.8);
@@ -50,7 +55,7 @@ function syntheticRig(template: HeadAsset) {
   scene.add(key);
   // A phone front camera at arm's length (focal ≈ 0.75 × the long side).
   const camera = new PerspectiveCamera(67.4, W / H, 0.01, 10);
-  camera.position.set(0, -0.045, 0.34);
+  camera.position.set(0, -0.045, distance);
   camera.lookAt(0, -0.045, 0);
   const render = (yaw: number, pitch: number) => {
     mesh.rotation.set((pitch * Math.PI) / 180, (yaw * Math.PI) / 180, 0, "YXZ");
@@ -58,6 +63,8 @@ function syntheticRig(template: HeadAsset) {
     return renderer.domElement;
   };
   const dispose = () => {
+    scene.remove(mesh);
+    mesh.rotation.set(0, 0, 0);
     renderer.dispose();
     renderer.forceContextLoss();
   };
@@ -69,8 +76,8 @@ function syntheticRig(template: HeadAsset) {
  * circle (as the guided scan asks) — as JPEG data URLs, fed to Chromium's
  * fake camera to test the live guided scan.
  */
-export function syntheticScanVideo(template: HeadAsset, fps = 15): { width: number; height: number; frames: string[] } {
-  const { W, H, render, dispose } = syntheticRig(template);
+export function syntheticScanVideo(template: HeadAsset, fps = 15, head?: Mesh): { width: number; height: number; frames: string[] } {
+  const { W, H, render, dispose } = syntheticRig(template, head);
   const frames: string[] = [];
   const shot = (yaw: number, pitch: number) => frames.push(render(yaw, pitch).toDataURL("image/jpeg", 0.9));
   const A = 50,
@@ -88,8 +95,8 @@ export function syntheticScanVideo(template: HeadAsset, fps = 15): { width: numb
   return { width: W, height: H, frames };
 }
 
-export async function syntheticCapture(template: HeadAsset): Promise<{ frames: CaptureFrame[]; log: string[] }> {
-  const { W, H, render, dispose } = syntheticRig(template);
+export async function syntheticCapture(template: HeadAsset, head?: Mesh, distance?: number): Promise<{ frames: CaptureFrame[]; log: string[] }> {
+  const { W, H, render, dispose } = syntheticRig(template, head, distance);
   const detector = await getFaceLandmarker("IMAGE");
   const poses: Array<[number, number]> = [
     [0, 0],

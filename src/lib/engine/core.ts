@@ -153,6 +153,9 @@ function sampleScalp(
     b = new Vector3(),
     cc = new Vector3(),
     bary = new Vector3();
+  // No roots on the ears (hair wraps around them).
+  const ear = new Uint8Array(positions.length / 3);
+  for (const v of rig.ears ?? []) if (v < ear.length) ear[v] = 1;
   let n = 0;
   for (let i = 0; i < total; i++) {
     const y = 1 - (2 * (i + 0.5)) / total;
@@ -171,6 +174,7 @@ function sampleScalp(
     const ia = idx[f * 3],
       ib = idx[f * 3 + 1],
       ic = idx[f * 3 + 2];
+    if (ear[ia] || ear[ib] || ear[ic]) continue;
     a.fromArray(positions, ia * 3);
     b.fromArray(positions, ib * 3);
     cc.fromArray(positions, ic * 3);

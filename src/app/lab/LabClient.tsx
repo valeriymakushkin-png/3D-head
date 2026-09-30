@@ -3,20 +3,11 @@
 import { useThree } from "@react-three/fiber";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { AgXToneMapping, BufferGeometry, Float32BufferAttribute, NeutralToneMapping, type Texture } from "three";
+import { AgXToneMapping, BufferGeometry, Float32BufferAttribute, type Mesh, Mesh as ThreeMesh, MeshStandardMaterial, NeutralToneMapping, type Texture } from "three";
 import { Avatar } from "@/components/three/Avatar";
 import { AvatarCanvas } from "@/components/three/AvatarCanvas";
 import { StudioStage } from "@/components/three/Stage";
-import {
-  DEFAULT_LOOK,
-  type Look,
-  LookSchema,
-  applyLookPatch,
-  HairstyleId,
-  BeardId,
-  GlassesId,
-  HairColorId,
-} from "@/lib/avatar/look";
+import { DEFAULT_LOOK, type Look, LookSchema, applyLookPatch, HairstyleId, BeardId, GlassesId, HairColorId } from "@/lib/avatar/look";
 import type { QualityTier } from "@/lib/engine/protocol";
 import { avatarEngine } from "@/lib/engine/client";
 import { HAIRSTYLE_PRESETS, resolveBeardParams, resolveHairColor, resolveHairParams } from "@/lib/hair/params";
@@ -27,6 +18,9 @@ import { reconstructInstantTwin } from "@/lib/recon/reconstruct";
 import { framesFromPhotos } from "@/lib/recon/capture";
 import { SYNTH_SCALE, syntheticCapture, syntheticScanVideo } from "./synthetic";
 import { applySimilarity, similarityAlign } from "@/lib/recon/linalg";
+import { fuseLandmarks } from "@/lib/recon/fusion";
+import { templateLandmarkNormals } from "@/lib/recon/reconstruct";
+import { type GtHead, gtError, loadGtHead } from "./gtHead";
 import { buildRig } from "@/lib/head/rig";
 import { autoRigMesh } from "@/lib/recon/autorig";
 
@@ -94,7 +88,11 @@ function RigBuilder() {
       const [geometry, albedo] = await Promise.all([loadTemplateGeometry(), loadTexture(TEMPLATE.albedo, true, true)]);
       const lms = await autoRigMesh(geometry, albedo as Texture);
       const rig = buildRig(lms, geometry.getAttribute("position").array);
-      const rounded = { ...rig, landmarks: rig.landmarks.map((v) => +v.toFixed(5)), hairline: rig.hairline.map((v) => +v.toFixed(4)) };
+      const rounded = {
+        ...rig,
+        landmarks: rig.landmarks.map((v) => +v.toFixed(5)),
+        hairline: rig.hairline.map((v) => +v.toFixed(4)),
+      };
       window.__RIG__ = rounded;
       setStatus(`rig ready: ${rig.landmarks.length / 3} landmarks, radii ${rig.radii.map((r) => r.toFixed(3)).join(", ")}`);
     })().catch((e) => {
@@ -108,6 +106,8 @@ function RigBuilder() {
 function LabScene({ recon = false }: { recon?: boolean }) {
   const q = useSearchParams();
   const [asset, setAsset] = useState<HeadAsset | null>(null);
+  const [gtMesh, setGtMesh] = useState<Mesh | null>(null);
+  const [show, setShow] = useState(q.get("show") ?? "twin");
   const [reconLog, setReconLog] = useState<string[]>([]);
   const [atlasUrl, setAtlasUrl] = useState<string | null>(null);
   const [shots, setShots] = useState<string[]>([]);
@@ -116,6 +116,7 @@ function LabScene({ recon = false }: { recon?: boolean }) {
   // Test harnesses shoot several angles of one reconstruction: window.__SETVIEW__("left").
   useEffect(() => {
     (window as unknown as { __SETVIEW__?: (v: string) => void }).__SETVIEW__ = setView;
+    (window as unknown as { __SETSHOW__?: (v: string) => void }).__SETSHOW__ = setShow;
   }, []);
   const quality = (q.get("q") ?? "high") as QualityTier;
   const look: Look = useMemo(() => {
@@ -135,7 +136,10 @@ function LabScene({ recon = false }: { recon?: boolean }) {
       },
       beard: bd.success ? { style: bd.data } : undefined,
       glasses: gl.success ? { style: gl.data } : undefined,
-      skin: { tone: q.get("tan") ? "tanned" : "natural", complexion: Number(q.get("cx") ?? 0) },
+      skin: {
+        tone: q.get("tan") ? "tanned" : "natural",
+        complexion: Number(q.get("cx") ?? 0),
+      },
       accessories: (q.get("acc")?.split(",").filter(Boolean) ?? []) as Look["accessories"],
     });
     return l;
@@ -151,16 +155,40 @@ function LabScene({ recon = false }: { recon?: boolean }) {
       const t0 = performance.now();
       // /lab?mode=recon&src=photos: real photos injected by a test harness as
       // window.__PHOTOS__ (data URLs), through the same import path as uploads.
-      const { frames, log } =
-        q.get("src") === "photos"
+      // /lab?mode=recon&src=gt: a real scanned head (window.__GTGLB__ / __GTTEX__ data
+      // URLs) → synthetic selfie session → twin, scored against the scan itself.
+      let gt: GtHead | null = null;
+      if (q.get("src") === "gt") {
+        const w = window as unknown as {
+          __GTGLB__?: string;
+          __GTTEX__?: string;
+        };
+        while (!w.__GTGLB__ || !w.__GTTEX__) await new Promise((r) => setTimeout(r, 100));
+        gt = await loadGtHead(w.__GTGLB__, w.__GTTEX__, template, q.get("morph") ? JSON.parse(q.get("morph")!) : {});
+        setGtMesh(gt.mesh);
+      }
+      const { frames, log } = gt
+        ? await syntheticCapture(template, gt.mesh)
+        : q.get("src") === "photos"
           ? await (async () => {
               const w = window as unknown as { __PHOTOS__?: string[] };
               while (!w.__PHOTOS__) await new Promise((r) => setTimeout(r, 100));
               const files = await Promise.all(
-                w.__PHOTOS__.map(async (u, i) => new File([await (await fetch(u)).blob()], `photo${i}.jpg`, { type: "image/jpeg" })),
+                w.__PHOTOS__.map(
+                  async (u, i) =>
+                    new File([await (await fetch(u)).blob()], `photo${i}.jpg`, {
+                      type: "image/jpeg",
+                    }),
+                ),
               );
               const r = await framesFromPhotos(files);
-              return { frames: r.frames, log: [`${r.frames.length} photos, rejected: ${r.rejected.join(", ") || "none"}`, ...r.frames.map((f) => `yaw ${f.pose.yaw.toFixed(1)} pitch ${f.pose.pitch.toFixed(1)}`)] };
+              return {
+                frames: r.frames,
+                log: [
+                  `${r.frames.length} photos, rejected: ${r.rejected.join(", ") || "none"}`,
+                  ...r.frames.map((f) => `yaw ${f.pose.yaw.toFixed(1)} pitch ${f.pose.pitch.toFixed(1)}`),
+                ],
+              };
             })()
           : await syntheticCapture(template);
       setShots(frames.map((f) => f.image.toDataURL("image/jpeg", 0.7)));
@@ -175,8 +203,13 @@ function LabScene({ recon = false }: { recon?: boolean }) {
         `done in ${((performance.now() - t0) / 1000).toFixed(1)}s · coverage ${(record.coverage * 100).toFixed(0)}%`,
         `face ${record.analysis.faceShape} · L/W ${record.analysis.metrics.lengthToWidth} · IPD ${record.analysis.metrics.ipdMm}mm`,
         `template L/W ${template.analysis.metrics.lengthToWidth}`,
-        ...(q.get("src") === "photos" ? [] : [groundTruthError(record.positions, record.rig.landmarks, template)]),
+        ...(gt
+          ? [gtError(record.positions, record.rig.landmarks, gt)]
+          : q.get("src") === "photos"
+            ? []
+            : [groundTruthError(record.positions, record.rig.landmarks, template)]),
       ]);
+      if (gt) console.info("[likeness] " + gtError(record.positions, record.rig.landmarks, gt));
       setAsset(withNat(await loadInstantHead(record)));
     })().catch((e) => {
       window.__ERR__ = String(e);
@@ -206,11 +239,15 @@ function LabScene({ recon = false }: { recon?: boolean }) {
         <FixedCamera view={view} />
         <Invalidator />
         <StudioStage />
-        {asset && (
-          <>
-            <Avatar asset={asset} look={look} quality={quality} onBusy={setBusy} />
-            {q.get("lm") && <Landmarks asset={asset} />}
-          </>
+        {gtMesh && show === "gt" ? (
+          <primitive object={gtMesh} />
+        ) : (
+          asset && (
+            <>
+              <Avatar asset={asset} look={look} quality={quality} onBusy={setBusy} />
+              {q.get("lm") && <Landmarks asset={asset} />}
+            </>
+          )
         )}
       </AvatarCanvas>
       {recon && !q.get("clean") && (
@@ -227,9 +264,7 @@ function LabScene({ recon = false }: { recon?: boolean }) {
         </div>
       )}
       {asset && q.get("info") && (
-        <pre className="absolute left-3 top-3 max-w-md text-[11px] leading-4 text-mist-300">
-          {JSON.stringify(asset.analysis, null, 1)}
-        </pre>
+        <pre className="absolute left-3 top-3 max-w-md text-[11px] leading-4 text-mist-300">{JSON.stringify(asset.analysis, null, 1)}</pre>
       )}
     </div>
   );
@@ -247,6 +282,7 @@ function LabRouter() {
   const q = useSearchParams();
   const mode = q.get("mode");
   if (mode === "synth") return <SynthShots />;
+  if (mode === "calib") return <Calibrate />;
   if (mode === "export") return <ExportDump />;
   return mode === "rig" ? <RigBuilder /> : <LabScene recon={mode === "recon"} />;
 }
@@ -378,4 +414,46 @@ function groundTruthError(positions: Float32Array, landmarks: ArrayLike<number>,
   const ratio = (L: ArrayLike<number>, sc?: readonly number[]) => (dist(L, 234, 454, sc) / dist(L, 10, 152, sc)).toFixed(3);
   const jaw = (L: ArrayLike<number>, sc?: readonly number[]) => (dist(L, 172, 397, sc) / dist(L, 10, 152, sc)).toFixed(3);
   return `GT rms ${(Math.sqrt(all / n) * 1000).toFixed(2)}mm · face ${(Math.sqrt(face / Math.max(1, nf)) * 1000).toFixed(2)}mm · W/L ${ratio(landmarks)} (gt ${ratio(T, SYNTH_SCALE)}) · jaw/L ${jaw(landmarks)} (gt ${jaw(T, SYNTH_SCALE)})`;
+}
+
+/**
+ * Template landmark calibration: the template itself goes through the same
+ * selfie session + fusion as a user (at a few arm's-length distances), and the
+ * averaged result becomes the template's `fitLandmarks`. The sculpting step then
+ * compares like with like — a jaw contour measured from seven close views is
+ * not where a straight-on telephoto render puts it, and that difference used to
+ * come out as every twin's jaw being too narrow.
+ */
+function Calibrate() {
+  const [status, setStatus] = useState("calibrating…");
+  useEffect(() => {
+    (async () => {
+      const template = await loadTemplateHead();
+      const head = new MeshStandardMaterial({ map: template.albedo, roughness: 0.6 });
+      const mesh = new ThreeMesh(template.geometry.clone(), head);
+      const T = template.rig.landmarks;
+      const normals = templateLandmarkNormals(template);
+      const acc = new Float64Array(478 * 3);
+      const dists = [0.3, 0.34, 0.4];
+      const lines: string[] = [];
+      for (const d of dists) {
+        const { frames } = await syntheticCapture(template, mesh, d);
+        const fusion = fuseLandmarks(
+          frames.map((f) => ({ landmarks: f.landmarks, width: f.width, height: f.height, yaw: f.pose.yaw })),
+          T,
+          normals,
+        );
+        // fused is anchored to the template frame by a similarity already
+        for (let i = 0; i < acc.length; i++) acc[i] += fusion.fused[i] / dists.length;
+        const dd = (P: ArrayLike<number>, a: number, b: number) => Math.hypot(P[a * 3] - P[b * 3], P[a * 3 + 1] - P[b * 3 + 1], P[a * 3 + 2] - P[b * 3 + 2]);
+        lines.push(`${d} m: ${frames.length} views · jaw ${(dd(fusion.fused, 172, 397) * 1000).toFixed(1)} mm (rig ${(dd(T, 172, 397) * 1000).toFixed(1)}) · face ${(dd(fusion.fused, 234, 454) * 1000).toFixed(1)} mm (rig ${(dd(T, 234, 454) * 1000).toFixed(1)})`);
+      }
+      (window as unknown as { __CALIB__?: number[] }).__CALIB__ = Array.from(acc, (v) => +v.toFixed(6));
+      setStatus(lines.join("\n"));
+    })().catch((e) => {
+      window.__ERR__ = String(e);
+      setStatus(`error: ${e}`);
+    });
+  }, []);
+  return <pre className="p-6 text-sm text-mist-200">{status}</pre>;
 }

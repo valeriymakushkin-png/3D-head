@@ -3,35 +3,13 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { toFrame, snapshot } from "@/lib/recon/capture";
-import type {
-  FaceLandmarker,
-  FaceLandmarkerResult,
-} from "@mediapipe/tasks-vision";
-import {
-  fallBackToCpu,
-  getFaceLandmarker,
-  poseFromMatrix,
-  preloadFaceTracking,
-} from "@/lib/recon/mediapipe";
-import {
-  POSE_TARGETS,
-  REQUIRED_BINS,
-  binForPose,
-  mergeFrame,
-  measureFrame,
-} from "@/lib/recon/poses";
+import type { FaceLandmarker, FaceLandmarkerResult } from "@mediapipe/tasks-vision";
+import { fallBackToCpu, getFaceLandmarker, poseFromMatrix, preloadFaceTracking } from "@/lib/recon/mediapipe";
+import { POSE_TARGETS, REQUIRED_BINS, binForPose, mergeFrame, measureFrame } from "@/lib/recon/poses";
 import type { CaptureFrame, PoseBinId } from "@/lib/recon/types";
 import { getTelegram, haptic } from "@/lib/telegram/webapp";
 
-type Hint =
-  | "noface"
-  | "center"
-  | "closer"
-  | "back"
-  | "level"
-  | "light"
-  | "still"
-  | null;
+type Hint = "noface" | "center" | "closer" | "back" | "level" | "light" | "still" | null;
 type Phase = "camera" | "tap" | "loading" | "tracking" | "error";
 /** align: frame the face and look straight (captures the front view); circle: roll the head around. */
 type Stage = "align" | "circle" | "done";
@@ -49,10 +27,8 @@ function cameraError(e: unknown): string {
   const name = e instanceof DOMException ? e.name : "";
   if (name === "NotAllowedError" || name === "SecurityError")
     return "Camera access is blocked. Allow it for this site in your browser settings, or upload photos instead.";
-  if (name === "NotFoundError" || name === "OverconstrainedError")
-    return "No front camera found. You can upload photos instead.";
-  if (name === "NotReadableError" || name === "AbortError")
-    return "The camera is busy in another app. Close it and try again, or upload photos.";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "No front camera found. You can upload photos instead.";
+  if (name === "NotReadableError" || name === "AbortError") return "The camera is busy in another app. Close it and try again, or upload photos.";
   return "This browser can't open the camera here. Try Safari or Chrome, or upload photos instead.";
 }
 
@@ -151,8 +127,7 @@ export function GuidedScan({
       // Start the ~12 MB runtime download while the permission prompt is up.
       preloadFaceTracking();
       try {
-        if (!navigator.mediaDevices?.getUserMedia)
-          throw new Error("unsupported");
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "user",
@@ -191,9 +166,7 @@ export function GuidedScan({
         detector = await withTimeout(getFaceLandmarker("VIDEO"), 60_000);
       } catch (e) {
         console.error("[scan] face tracking failed to load", e);
-        return fail(
-          "Face tracking couldn't load. Check your connection and try again, or upload photos instead.",
-        );
+        return fail("Face tracking couldn't load. Check your connection and try again, or upload photos instead.");
       }
       if (stopped) return;
       setPhase("tracking");
@@ -223,11 +196,7 @@ export function GuidedScan({
         swapping = true;
         getFaceLandmarker("VIDEO")
           .then((d) => (detector = d))
-          .catch(() =>
-            fail(
-              "Face tracking isn't supported on this device. You can upload photos instead.",
-            ),
-          )
+          .catch(() => fail("Face tracking isn't supported on this device. You can upload photos instead."))
           .finally(() => (swapping = false));
         return true;
       };
@@ -250,13 +219,7 @@ export function GuidedScan({
       const loop = () => {
         if (stopped) return;
         raf = requestAnimationFrame(loop);
-        if (
-          swapping ||
-          v.readyState < 2 ||
-          !v.videoWidth ||
-          stageRef.current === "done"
-        )
-          return;
+        if (swapping || v.readyState < 2 || !v.videoWidth || stageRef.current === "done") return;
         const now = performance.now();
         feed.width = FEED_WIDTH;
         feed.height = Math.round((FEED_WIDTH * v.videoHeight) / v.videoWidth);
@@ -268,17 +231,11 @@ export function GuidedScan({
           errors = 0;
         } catch (e) {
           console.warn("[scan] tracking error", e);
-          if (++errors >= 5 && !switchToCpu())
-            fail(
-              "Face tracking stopped working on this device. You can upload photos instead.",
-            );
+          if (++errors >= 5 && !switchToCpu()) fail("Face tracking stopped working on this device. You can upload photos instead.");
           return;
         }
         frameNo++;
-        if (
-          !res.faceLandmarks.length ||
-          !res.facialTransformationMatrixes?.length
-        ) {
+        if (!res.faceLandmarks.length || !res.facialTransformationMatrixes?.length) {
           const lost = now - lastFace;
           // A GPU delegate that initialises but never finds a face: retry once on CPU.
           if (lost > 6000 && switchToCpu()) lastFace = now;
@@ -318,13 +275,7 @@ export function GuidedScan({
                 : s === "align" && Math.hypot(offX, offY) > 0.2
                   ? "center"
                   : null;
-        if (
-          !hintNow &&
-          s === "align" &&
-          Math.abs(p.pitch) > 16 &&
-          Math.abs(p.yaw) < 15
-        )
-          hintNow = "level";
+        if (!hintNow && s === "align" && Math.abs(p.pitch) > 16 && Math.abs(p.yaw) < 15) hintNow = "level";
         if (!hintNow && speed > (s === "align" ? 25 : 80)) hintNow = "still";
         showHint(hintNow, now);
 
@@ -348,16 +299,10 @@ export function GuidedScan({
         let dir = -1;
         if (!hintNow && mag > 0.2) {
           const ang = Math.atan2(d.y, d.x);
-          dir =
-            Math.round(
-              ((ang < 0 ? ang + Math.PI * 2 : ang) / (Math.PI * 2)) * TICKS,
-            ) % TICKS;
+          dir = Math.round(((ang < 0 ? ang + Math.PI * 2 : ang) / (Math.PI * 2)) * TICKS) % TICKS;
           for (let k = -2; k <= 2; k++) {
             const i = (dir + k + TICKS) % TICKS;
-            ticks.current[i] = Math.max(
-              ticks.current[i],
-              Math.min(1, mag * (1 - Math.abs(k) * 0.04)),
-            );
+            ticks.current[i] = Math.max(ticks.current[i], Math.min(1, mag * (1 - Math.abs(k) * 0.04)));
           }
         }
         if (now - lastPaint > 60) {
@@ -375,9 +320,7 @@ export function GuidedScan({
       loop();
     })().catch((e) => {
       console.error("[scan]", e);
-      fail(
-        "Something went wrong starting the scan. You can upload photos instead.",
-      );
+      fail("Something went wrong starting the scan. You can upload photos instead.");
     });
 
     return () => {
@@ -404,12 +347,7 @@ export function GuidedScan({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
 
-  const canFinishEarly =
-    stage === "circle" &&
-    ["front", "left30", "right30"].every((b) =>
-      filled.includes(b as PoseBinId),
-    ) &&
-    filled.length >= 5;
+  const canFinishEarly = stage === "circle" && ["front", "left30", "right30"].every((b) => filled.includes(b as PoseBinId)) && filled.length >= 5;
   const hintText: Record<Exclude<Hint, null>, string> = {
     noface: "Show your face to the camera",
     center: "Fit your face in the circle",
@@ -437,21 +375,10 @@ export function GuidedScan({
       const covered = view.ticks.filter((t) => t >= 1).length;
       if (covered < TICKS * 0.12) return "Slowly move your head in a circle";
       // Mirrored preview: screen-left is the user's own left.
-      const where = [
-        "right",
-        "up and right",
-        "up",
-        "up and left",
-        "left",
-        "down and left",
-        "down",
-        "down and right",
-      ][Math.round((best / TICKS) * 8) % 8];
+      const where = ["right", "up and right", "up", "up and left", "left", "down and left", "down", "down and right"][Math.round((best / TICKS) * 8) % 8];
       return `Keep circling — ${where} next`;
     }
-    return missing.length
-      ? (BIN_WORDS[missing[0]] ?? "Hold still for a moment")
-      : "Perfect";
+    return missing.length ? (BIN_WORDS[missing[0]] ?? "Hold still for a moment") : "Perfect";
   })();
 
   const message =
@@ -483,20 +410,13 @@ export function GuidedScan({
           : null;
 
   return (
-    <div
-      className="fixed inset-0 flex flex-col items-center overflow-hidden text-ink-950"
-      style={{ background: PAPER }}
-    >
+    <div className="fixed inset-0 flex flex-col items-center overflow-hidden text-ink-950" style={{ background: PAPER }}>
       <div className="flex w-full items-center justify-between px-4 pt-[calc(var(--tg-safe-top)+14px)]">
-        <button
-          onClick={onCancel}
-          className="h-9 rounded-full bg-ink-950/[0.06] px-4 text-[14px] font-medium text-ink-800 active:bg-ink-950/10"
-        >
+        <button onClick={onCancel} className="h-9 rounded-full bg-ink-950/[0.06] px-4 text-[14px] font-medium text-ink-800 active:bg-ink-950/10">
           Cancel
         </button>
         <span className="text-[12px] font-medium tabular-nums text-ink-500">
-          {filled.filter((f) => required.includes(f)).length} /{" "}
-          {required.length}
+          {filled.filter((f) => required.includes(f)).length} / {required.length}
         </span>
       </div>
 
@@ -514,30 +434,16 @@ export function GuidedScan({
           {detail && <p className="mt-2 text-[14px] text-ink-500">{detail}</p>}
         </div>
 
-        <div
-          className="relative mt-[5vh]"
-          style={{ width: "min(76vw, 48vh, 400px)", aspectRatio: "1" }}
-        >
+        <div className="relative mt-[5vh]" style={{ width: "min(76vw, 48vh, 400px)", aspectRatio: "1" }}>
           <div className="absolute inset-0 overflow-hidden rounded-full bg-ink-950 shadow-[0_30px_80px_-30px_rgba(40,30,20,0.45)]">
-            <video
-              ref={video}
-              playsInline
-              muted
-              className="size-full -scale-x-100 object-cover"
-            />
+            <video ref={video} playsInline muted className="size-full -scale-x-100 object-cover" />
             {(phase === "camera" || phase === "loading") && (
-              <div
-                className="absolute inset-0 grid place-items-center"
-                aria-live="polite"
-              >
+              <div className="absolute inset-0 grid place-items-center" aria-live="polite">
                 <span className="size-9 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
               </div>
             )}
             {phase === "tap" && (
-              <button
-                onClick={() => tapToStart.current?.()}
-                className="absolute inset-0 grid place-items-center text-[15px] font-semibold text-mist-50"
-              >
+              <button onClick={() => tapToStart.current?.()} className="absolute inset-0 grid place-items-center text-[15px] font-semibold text-mist-50">
                 Tap to start the camera
               </button>
             )}
@@ -551,34 +457,21 @@ export function GuidedScan({
               />
             </AnimatePresence>
           </div>
-          <ScanRing
-            ticks={view.ticks}
-            dir={stage === "circle" ? view.dir : -1}
-            stage={stage}
-          />
+          <ScanRing ticks={view.ticks} dir={stage === "circle" ? view.dir : -1} stage={stage} />
         </div>
       </div>
 
       <div className="flex min-h-[72px] flex-col items-center justify-end gap-3 px-6 pb-[calc(var(--tg-safe-bottom)+28px)] text-center">
         {error ? (
-          <button
-            onClick={onUpload ?? onCancel}
-            className="h-12 rounded-full bg-ink-950 px-6 text-[15px] font-semibold text-mist-50"
-          >
+          <button onClick={onUpload ?? onCancel} className="h-12 rounded-full bg-ink-950 px-6 text-[15px] font-semibold text-mist-50">
             Upload photos instead
           </button>
         ) : canFinishEarly ? (
-          <button
-            onClick={() => onDone([...bins.current.values()])}
-            className="text-[14px] text-ink-500 underline underline-offset-4"
-          >
+          <button onClick={() => onDone([...bins.current.values()])} className="text-[14px] text-ink-500 underline underline-offset-4">
             Finish now with {filled.length} angles
           </button>
         ) : (
-          <p className="max-w-xs text-[12px] leading-5 text-ink-500">
-            Keep the phone still and turn only your head. Good light makes a
-            better twin.
-          </p>
+          <p className="max-w-xs text-[12px] leading-5 text-ink-500">Keep the phone still and turn only your head. Good light makes a better twin.</p>
         )}
       </div>
     </div>
@@ -586,29 +479,15 @@ export function GuidedScan({
 }
 
 /** Ring of ticks around the camera circle (Face ID style). */
-function ScanRing({
-  ticks,
-  dir,
-  stage,
-}: {
-  ticks: Float32Array;
-  dir: number;
-  stage: Stage;
-}) {
+function ScanRing({ ticks, dir, stage }: { ticks: Float32Array; dir: number; stage: Stage }) {
   const R = 50; // circle radius in viewBox units (the ring sits just outside it)
   return (
-    <svg
-      className="pointer-events-none absolute -inset-[13%] size-[126%]"
-      viewBox="-63 -63 126 126"
-      aria-hidden
-    >
+    <svg className="pointer-events-none absolute -inset-[13%] size-[126%]" viewBox="-63 -63 126 126" aria-hidden>
       {Array.from({ length: TICKS }, (_, k) => {
         const a = (k / TICKS) * Math.PI * 2;
         const f = stage === "done" ? 1 : stage === "align" ? 0 : ticks[k];
         const done = f >= 1;
-        const near =
-          dir >= 0 &&
-          Math.min(Math.abs(k - dir), TICKS - Math.abs(k - dir)) <= 2;
+        const near = dir >= 0 && Math.min(Math.abs(k - dir), TICKS - Math.abs(k - dir)) <= 2;
         const r0 = R + 4;
         const r1 = r0 + 4 + 5 * f + (near ? 1.5 : 0);
         const c = Math.cos(a),
@@ -620,13 +499,7 @@ function ScanRing({
             y1={s * r0}
             x2={c * r1}
             y2={s * r1}
-            stroke={
-              done
-                ? "#1fae6b"
-                : near
-                  ? "rgba(20,18,16,0.55)"
-                  : `rgba(20,18,16,${0.16 + 0.3 * f})`
-            }
+            stroke={done ? "#1fae6b" : near ? "rgba(20,18,16,0.55)" : `rgba(20,18,16,${0.16 + 0.3 * f})`}
             strokeWidth={1.3}
             strokeLinecap="round"
             style={{ transition: "stroke 0.25s" }}

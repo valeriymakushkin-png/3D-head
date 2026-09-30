@@ -1,7 +1,7 @@
 import type { BufferAttribute } from "three";
 import type { BeardParams, HairParams } from "@/lib/hair/params";
 import { beardMask, scalpCoverage } from "@/lib/hair/regions";
-import { BROW_L, BROW_R, EYE_L, EYE_R, type HeadRig, LIPS_OUTER, LM, type Vec3, lmk, smoothstep } from "@/lib/head/rig";
+import { BROW_L, BROW_R, EYE_L, EYE_R, FACE_OVAL, type HeadRig, LIPS_OUTER, LM, type Vec3, lmk, smoothstep } from "@/lib/head/rig";
 
 type Poly = Array<[number, number]>;
 
@@ -20,6 +20,20 @@ function inside(x: number, y: number, pts: Poly) {
     if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi) c = !c;
   }
   return c;
+}
+
+/** Distance to the polygon's boundary (inside or out). */
+function edgeDistance(x: number, y: number, pts: Poly) {
+  let d = Infinity;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [ax, ay] = pts[j];
+    const [bx, by] = pts[i];
+    const vx = bx - ax,
+      vy = by - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy + 1e-12)));
+    d = Math.min(d, Math.hypot(x - ax - vx * t, y - ay - vy * t));
+  }
+  return d;
 }
 
 function distToPoly(x: number, y: number, pts: Poly) {
@@ -61,6 +75,8 @@ export function expressionMask(positions: ArrayLike<number>, landmarks: ArrayLik
 export interface StaticMasks {
   beardZone: Float32Array;
   features: Float32Array;
+  /** 1 on the ears: never tinted as scalp. */
+  ears: Float32Array;
 }
 
 /** Masks that depend only on the head, computed once per avatar. */
@@ -91,7 +107,9 @@ export function computeStaticMasks(positions: ArrayLike<number>, rig: HeadRig): 
       features[i] = 1 - smoothstep(0.0015, 0.006, d);
     }
   }
-  return { beardZone, features };
+  const ears = new Float32Array(n);
+  for (const i of rig.ears ?? []) if (i < n) ears[i] = 1;
+  return { beardZone, features, ears };
 }
 
 /** Writes the dynamic masks for the current hairstyle and beard. */
@@ -112,8 +130,32 @@ export function writeMasks(
     p[2] = positions[i * 3 + 2];
     arr[i * 4] = beard ? beardMask(rig, beard, p) : 0;
     arr[i * 4 + 1] = statics.beardZone[i];
-    arr[i * 4 + 2] = hair ? scalpCoverage(rig, hair, p) : 0;
+    arr[i * 4 + 2] = hair ? scalpCoverage(rig, hair, p) * (1 - statics.ears[i]) : 0;
     arr[i * 4 + 3] = statics.features[i];
   }
   attr.needsUpdate = true;
+}
+
+/**
+ * 1 inside the face oval (frontal projection, in front of the ears), 0 outside,
+ * with a soft ~6 mm edge — and 0 again in a band just under the top of the oval,
+ * where a hairline or a fringe's edge usually sits.
+ */
+export function faceOvalMask(positions: ArrayLike<number>, landmarks: ArrayLike<number>): Float32Array {
+  const n = positions.length / 3;
+  const out = new Float32Array(n);
+  const rig = { landmarks } as Pick<HeadRig, "landmarks">;
+  const oval = poly(rig as HeadRig, FACE_OVAL);
+  const zFront = Math.min(landmarks[234 * 3 + 2], landmarks[454 * 3 + 2]) - 0.005;
+  const yTop = landmarks[10 * 3 + 1];
+  for (let i = 0; i < n; i++) {
+    const x = positions[i * 3],
+      y = positions[i * 3 + 1],
+      z = positions[i * 3 + 2];
+    if (z < zFront - 0.01) continue;
+    const d = edgeDistance(x, y, oval);
+    const sd = inside(x, y, oval) ? d : -d;
+    out[i] = smoothstep(-0.003, 0.006, sd) * smoothstep(zFront - 0.01, zFront, z) * smoothstep(yTop - 0.004, yTop - 0.016, y);
+  }
+  return out;
 }

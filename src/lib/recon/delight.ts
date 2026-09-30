@@ -42,6 +42,8 @@ export function fitShading(v: {
   feat: ArrayLike<number>;
   /** Head → image (x right, y up/negative, z towards the camera), 3×4 row-major. */
   affine: number[];
+  /** Perspective (see reconstruct): image = c + (A·x − c) / (1 − z/f). */
+  focal?: number;
   residual: ArrayLike<number>;
   skinMask: Uint8Array;
   pixels: Uint8ClampedArray;
@@ -68,8 +70,11 @@ export function fitShading(v: {
     nz /= nl;
     if (nz < 0.3) continue;
     const q = applyAffine(v.affine, v.positions[i * 3], v.positions[i * 3 + 1], v.positions[i * 3 + 2]);
-    const px = Math.round(q[0] + v.residual[i * 2]),
-      py = Math.round(-(q[1] + v.residual[i * 2 + 1]));
+    const w = v.focal ? Math.max(0.5, 1 - q[2] / v.focal) : 1;
+    const qx = v.width / 2 + (q[0] - v.width / 2) / w,
+      qy = -v.height / 2 + (q[1] + v.height / 2) / w;
+    const px = Math.round(qx + v.residual[i * 2]),
+      py = Math.round(-(qy + v.residual[i * 2 + 1]));
     if (px < 2 || py < 2 || px >= v.width - 2 || py >= v.height - 2) continue;
     const o = py * v.width + px;
     if (v.skinMask[o] < 200) continue;

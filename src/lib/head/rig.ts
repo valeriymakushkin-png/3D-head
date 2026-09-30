@@ -72,6 +72,14 @@ export interface HeadRig {
   hairline: number[];
   /** Mesh-space → head-space transform used when the rig was built (column-major 4×4). */
   meshToHead: number[];
+  /**
+   * Template only: the landmarks as the capture pipeline itself measures this
+   * head (a selfie session of the template, fused). Sculpting compares a user's
+   * fused landmarks with these, so systematic measurement biases cancel.
+   */
+  fitLandmarks?: number[];
+  /** Vertex indices of the ears (template topology): no hair roots, no scalp tint. */
+  ears?: number[];
 }
 
 export function lmk(rig: Pick<HeadRig, "landmarks">, i: number): Vec3 {
@@ -244,8 +252,10 @@ export function estimateHairline(rig: Pick<HeadRig, "landmarks" | "center" | "ra
     forehead + 0.2, // 50°  temple, sloping down towards the sideburn
     temple + 0.1, // 75°  sideburn
     temple + 0.02, // 88°  sideburn bottom, just in front of the ear
-    brow + 0.22, // 102° clears the top of the ear
-    temple + 0.05, // 122° descends behind the ear
+    // Hair wraps closely around the ear (the ear itself is masked out by
+    // rig.ears): no notch over the ear, which used to leave a bald strip behind it.
+    (temple + 0.02 + temple + 0.05) / 2, // 102°
+    temple + 0.05, // 122° behind the ear
     nape + 0.08, // 150°
     nape, // 180°  nape at mouth height
   ];

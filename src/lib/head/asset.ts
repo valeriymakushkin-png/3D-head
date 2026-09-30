@@ -152,10 +152,7 @@ export async function loadTemplateHead(): Promise<HeadAsset> {
     // The template scan's UVs follow the classic three.js (flipY) convention.
     loadTexture(TEMPLATE.albedo, true, true),
     loadTexture(TEMPLATE.normal, false, true),
-    fetch(TEMPLATE.rig).then((r) => {
-      if (!r.ok) throw new Error("template rig missing — run `npm run rig:template`");
-      return r.json() as Promise<HeadRig>;
-    }),
+    loadTemplateRig(),
   ]);
   // Hairline rules evolve with the product; the template always uses the latest.
   rig.hairline = estimateHairline(rig);
@@ -221,15 +218,30 @@ export async function loadHdHead(meta: {
 }
 
 /** Rebuilds a renderable head from an on-device Instant Twin record. */
+let templateRigPromise: Promise<HeadRig> | null = null;
+/** The template's rig file (cached): ear vertices etc. shared by every twin with its topology. */
+export function loadTemplateRig(): Promise<HeadRig> {
+  templateRigPromise ??= fetch(TEMPLATE.rig).then((r) => {
+    if (!r.ok) throw new Error("template rig missing — run `npm run rig:template`");
+    return r.json() as Promise<HeadRig>;
+  });
+  return templateRigPromise.then((r) => ({ ...r }));
+}
+
 export async function loadInstantHead(record: import("@/lib/recon/storage").InstantTwinRecord): Promise<HeadAsset> {
-  const [geometry, normalMap, bitmap] = await Promise.all([
+  const [geometry, normalMap, bitmap, tplRig] = await Promise.all([
     loadTemplateGeometry(),
     loadTexture(TEMPLATE.normal, false, true),
     decodeImage(record.albedo),
+    loadTemplateRig(),
   ]);
+  // Twins share the template's topology: its ear mask applies as is, and the
+  // hairline follows the current rules (older twins included).
+  const rig: HeadRig = { ...record.rig, ears: record.rig.ears ?? tplRig.ears };
+  rig.hairline = estimateHairline(rig);
   geometry.setAttribute("position", new BufferAttribute(record.positions.slice(), 3));
   geometry.deleteAttribute("normal");
-  prepareHeadGeometry(geometry, record.rig, true);
+  prepareHeadGeometry(geometry, rig, true);
   // Draw to a canvas: ImageBitmap uploads ignore flipY, canvases honour it.
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
@@ -245,10 +257,10 @@ export async function loadInstantHead(record: import("@/lib/recon/storage").Inst
     geometry,
     albedo,
     normalMap,
-    rig: record.rig,
+    rig,
     natural: record.natural,
     analysis: record.analysis,
-    statics: computeStaticMasks(geometry.getAttribute("position").array, record.rig),
+    statics: computeStaticMasks(geometry.getAttribute("position").array, rig),
     skinColor: new Color(`rgb(${record.skinRgb.map(Math.round).join(",")})`),
     bakedBeard: record.bakedBeard,
     skinRgb: record.skinRgb,

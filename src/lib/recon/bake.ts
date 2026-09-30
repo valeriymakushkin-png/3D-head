@@ -52,6 +52,8 @@ export interface BakeView {
   height: number;
   /** head space → image space (x px right, y px up (negative), z px towards camera), 3×4 row-major. */
   affine: number[];
+  /** Perspective: image = c + (A·x − c) / (1 − z/f); omitted = weak perspective. */
+  focal?: number;
   /** Per-vertex 2D landmark residual correction (pixels). */
   residual: Float32Array;
   /** Skin probability (0..255), same size as the image. */
@@ -62,15 +64,20 @@ export interface BakeView {
   weight: number;
   /** Weight multiplier inside the eye/mouth mask (1 for the front photo, ~0 for others). */
   featureKeep: number;
+  /** Head-space depth behind which this photo contributes nothing (side photos: just in front of the ears). */
+  reachZ?: number;
 }
 
 const common = /* glsl */ `
   uniform mat4 uAff;
   uniform vec2 uImg;
   uniform vec2 uZ;
+  uniform float uFocal;
   attribute vec2 aResid;
   vec3 toImage(vec3 p) {
     vec3 q = (uAff * vec4(p, 1.0)).xyz;
+    vec2 c = vec2(0.5 * uImg.x, -0.5 * uImg.y);
+    q.xy = c + (q.xy - c) / max(0.5, 1.0 - q.z / uFocal);
     q.xy += aResid;
     return q;
   }
@@ -96,7 +103,10 @@ const accumVS = /* glsl */ `
   uniform mat3 uNrm;
   uniform vec4 uJaw;
   attribute float aFeat;
+  attribute float aOval;
+  varying float vOval;
   varying float vJaw;
+  varying float vHeadZ;
   varying vec3 vImg;
   varying vec3 vN;
   varying float vZ;
@@ -106,6 +116,8 @@ const accumVS = /* glsl */ `
     vImg = q;
     vFeat = aFeat;
     vJaw = dot(position, uJaw.xyz) - uJaw.w;
+    vOval = aOval;
+    vHeadZ = position.z;
     vN = uNrm * normal;
     vZ = zNorm(q.z);
     gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
@@ -121,7 +133,11 @@ const accumFS = /* glsl */ `
   uniform float uFeatureKeep;
   uniform float uSH[9];
   uniform float uDelight;
+  uniform vec3 uSkin;
+  uniform float uReachZ;
+  varying float vOval;
   varying float vJaw;
+  varying float vHeadZ;
   varying vec3 vImg;
   varying vec3 vN;
   varying float vZ;
@@ -139,15 +155,31 @@ const accumFS = /* glsl */ `
     float feat = mix(1.0, uFeatureKeep, vFeat);
     // Below the jaw line the photo is mostly shadow and collar: let the fill take over.
     float neck = smoothstep(-0.035, -0.008, vJaw);
-    float w = vis * facing * facing * facing * facing * seg * edge * uWeight * feat * neck;
+    // A side photo is registered by the face's landmarks; beyond the face
+    // (ears, the back of the head) its error grows to centimetres — a ghost ear
+    // on the cheek. There the fill (neighbouring skin) takes over.
+    float reach = smoothstep(uReachZ - 0.004, uReachZ + 0.014, vHeadZ);
+    float w = vis * facing * facing * facing * facing * seg * edge * uWeight * feat * neck * reach;
     vec3 c = texture2D(uPhoto, t).rgb * uGain;
     if (uDelight > 0.5) {
       // Divide out the room's light (relative to camera-facing skin); partial
       // and clamped, so hard shadows and bad fits can't blow texels out.
       float shade = uSH[0] + uSH[1] * n.y + uSH[2] * n.z + uSH[3] * n.x + uSH[4] * n.x * n.y + uSH[5] * n.y * n.z
         + uSH[6] * (3.0 * n.z * n.z - 1.0) + uSH[7] * n.x * n.z + uSH[8] * (n.x * n.x - n.y * n.y);
-      c /= pow(clamp(shade, 0.5, 1.8), 0.85);
+      // Only where the fit had data (surfaces facing the camera); elsewhere the
+      // extrapolated lighting is a guess and would tint or blow out texels.
+      float support = smoothstep(0.2, 0.5, n.z);
+      c /= pow(clamp(shade, 0.6, 1.6), 0.85 * support);
     }
+    // Outside the face oval (scalp line, temples, ears, neck) only skin belongs
+    // in the atlas: a lock of hair at the hairline or the background beside a
+    // bald head would otherwise bake in as a green or grey band.
+    float lc = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float ls = dot(uSkin, vec3(0.2126, 0.7152, 0.0722));
+    vec2 ch = c.rg / max(1e-4, c.r + c.g + c.b);
+    vec2 cs = uSkin.rg / max(1e-4, uSkin.r + uSkin.g + uSkin.b);
+    float skinLike = exp(-dot(ch - cs, ch - cs) / (0.045 * 0.045)) * smoothstep(0.3, 0.55, lc / ls) * (1.0 - smoothstep(2.0, 3.0, lc / ls));
+    w *= mix(skinLike, 1.0, vOval);
     gl_FragColor = vec4(c * w, w);
   }
 `;
@@ -201,6 +233,8 @@ export function bakeTexture(
   size = 2048,
   /** Plane of the jaw line (unit normal pointing up into the face, offset): x·n − d. */
   jaw?: [number, number, number, number],
+  /** The calibrated skin colour (linear): outside the face oval, only samples like it are kept. */
+  skinLinear?: [number, number, number],
 ): BakeResult {
   const renderer = new WebGLRenderer({ antialias: false, preserveDrawingBuffer: false });
   renderer.setPixelRatio(1);
@@ -234,6 +268,7 @@ export function bakeTexture(
     uAff: { value: new Matrix4() },
     uImg: { value: new Vector2() },
     uZ: { value: new Vector2() },
+    uFocal: { value: 1e9 },
     uNrm: { value: new Matrix3() },
     uPhoto: { value: null as Texture | null },
     uSeg: { value: null as Texture | null },
@@ -243,13 +278,15 @@ export function bakeTexture(
     uFeatureKeep: { value: 1 },
     uSH: { value: new Array(9).fill(0) as number[] },
     uJaw: { value: new Vector4(0, 1, 0, -1) },
+    uSkin: { value: new Vector3(0.5, 0.3, 0.25) },
+    uReachZ: { value: -10 },
     uDelight: { value: 0 },
   };
   const depthMat = new ShaderMaterial({
     vertexShader: depthVS,
     fragmentShader: depthFS,
     side: DoubleSide,
-    uniforms: { uAff: U.uAff, uImg: U.uImg, uZ: U.uZ },
+    uniforms: { uAff: U.uAff, uImg: U.uImg, uZ: U.uZ, uFocal: U.uFocal },
   });
   const accumMat = new ShaderMaterial({
     uniforms: U,
@@ -267,6 +304,8 @@ export function bakeTexture(
   });
 
   if (jaw) U.uJaw.value.set(...jaw);
+  if (skinLinear) U.uSkin.value.set(...skinLinear);
+  if (!geometry.getAttribute("aOval")) geometry.setAttribute("aOval", new BufferAttribute(new Float32Array(geometry.getAttribute("position").count).fill(1), 1));
   const pos = geometry.getAttribute("position");
   for (const v of views) {
     residAttr.array.set(v.residual);
@@ -282,6 +321,7 @@ export function bakeTexture(
     U.uAff.value.copy(aff);
     U.uImg.value.set(v.width, v.height);
     U.uZ.value.set(zMin, zMax);
+    U.uFocal.value = v.focal ?? 1e9;
 
     // (1) depth from the photo's camera
     const depth = new WebGLRenderTarget(v.width, v.height, { type: HalfFloatType, format: RGBAFormat, depthBuffer: true });
@@ -309,6 +349,7 @@ export function bakeTexture(
     U.uGain.value.set(...v.gain);
     U.uWeight.value = v.weight;
     U.uFeatureKeep.value = v.featureKeep;
+    U.uReachZ.value = v.reachZ ?? -10;
     U.uDelight.value = v.shading ? 1 : 0;
     if (v.shading) U.uSH.value = v.shading.sh.map((c) => c / v.shading!.ref);
     mesh.material = accumMat;

@@ -1,8 +1,9 @@
-import { applyAffine, fitAffine, fitRbf, similarityAlign, similarityToAffine } from "@/lib/recon/linalg";
+import { type Similarity, applyAffine, fitRbf, similarityAlign } from "@/lib/recon/linalg";
 
 /**
  * Sculpts the template into the user's head:
- *   1. a lightly regularised affine (head width / height / depth proportions),
+ *   1. the head's proportions: a similarity plus a scale per axis (width,
+ *      height, depth) — no shear, so the head can't tilt,
  *   2. a Gaussian RBF displacement field through the 468 face landmarks
  *      (nose, lips, eyelids, jaw…), which decays to zero ~6 cm away so the
  *      skull and neck stay smooth.
@@ -18,16 +19,12 @@ export function warpTemplate(
   const T = Float64Array.from({ length: N * 3 }, (_, i) => templateLandmarks[i]);
   const F = Float64Array.from({ length: N * 3 }, (_, i) => target[i]);
 
+  // Proportions without shear: the similarity's rotation, plus one scale per
+  // axis of the template's own frame (width, height, depth). A general affine
+  // can also shear, which tilts the whole head (a face "looking down") when
+  // the fused depth is noisy.
   const sim = similarityAlign(T, F);
-  const prior = similarityToAffine(sim);
-  // Light pull towards a pure similarity: a long, narrow face must stay long
-  // and narrow (a heavy prior here averaged every face towards the template's).
-  // Width/height follow the photos closely; depth (regressed by the tracker,
-  // and fragile on steeply tilted frames) leans on the template's proportions.
-  // A fit that would squash or mirror the head falls back to the similarity.
-  let affine = fitAffine(T, F, undefined, [N * 0.0006, N * 0.0006, N * 0.004], prior);
-  const s3 = Math.pow(sim.s, 3);
-  if (!(det3(affine) > 0.6 * s3 && det3(affine) < 1.6 * s3)) affine = fitAffine(T, F, undefined, N * 0.02, prior);
+  const affine = axisScaledSimilarity(T, F, sim);
 
   const resid = new Float64Array(N * 3);
   let rss = 0;
@@ -67,6 +64,49 @@ export function warpTemplate(
   return { positions: out, affine, residualRms: Math.sqrt(rss / N) };
 }
 
-function det3(M: number[]) {
-  return M[0] * (M[5] * M[10] - M[6] * M[9]) - M[1] * (M[4] * M[10] - M[6] * M[8]) + M[2] * (M[4] * M[9] - M[5] * M[8]);
+/**
+ * F ≈ s·R·diag(k)·(T − c) + …: maps F back into the template's frame with the
+ * similarity, then fits one scale per axis about the landmarks' centroid.
+ * Width and height are trusted (clamped to a human range); depth, regressed
+ * by the tracker, only a little.
+ */
+export function axisScaledSimilarity(T: ArrayLike<number>, F: ArrayLike<number>, sim: Similarity): number[] {
+  const { s, R, t } = sim;
+  const n = T.length / 3;
+  const cT = [0, 0, 0],
+    cU = [0, 0, 0];
+  const U = new Float64Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const dx = F[i * 3] - t[0],
+      dy = F[i * 3 + 1] - t[1],
+      dz = F[i * 3 + 2] - t[2];
+    // Rᵀ (F − t) / s
+    U[i * 3] = (R[0] * dx + R[3] * dy + R[6] * dz) / s;
+    U[i * 3 + 1] = (R[1] * dx + R[4] * dy + R[7] * dz) / s;
+    U[i * 3 + 2] = (R[2] * dx + R[5] * dy + R[8] * dz) / s;
+    for (let a = 0; a < 3; a++) {
+      cT[a] += T[i * 3 + a] / n;
+      cU[a] += U[i * 3 + a] / n;
+    }
+  }
+  const k = [0, 1, 2].map((a) => {
+    let num = 0,
+      den = 0;
+    for (let i = 0; i < n; i++) {
+      const p = T[i * 3 + a] - cT[a];
+      num += p * (U[i * 3 + a] - cU[a]);
+      den += p * p;
+    }
+    const raw = den > 0 ? num / den : 1;
+    return a === 2 ? 1 + (Math.min(1.12, Math.max(0.9, raw)) - 1) * 0.5 : Math.min(1.18, Math.max(0.85, raw));
+  });
+  // x' = s R (diag(k)(x − cT) + cU) + t
+  const M: number[] = [];
+  for (let r = 0; r < 3; r++) {
+    const row = [R[r * 3] * s * k[0], R[r * 3 + 1] * s * k[1], R[r * 3 + 2] * s * k[2]];
+    const off = [cU[0] - k[0] * cT[0], cU[1] - k[1] * cT[1], cU[2] - k[2] * cT[2]];
+    const tr = s * (R[r * 3] * off[0] + R[r * 3 + 1] * off[1] + R[r * 3 + 2] * off[2]) + t[r];
+    M.push(row[0], row[1], row[2], tr);
+  }
+  return M;
 }

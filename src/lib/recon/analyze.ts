@@ -264,7 +264,8 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
     volume: Math.min(0.5, Math.max(0.12, 0.1 + hairHeight * 1.4)),
     curl: 0.15,
     color,
-    density: Math.min(1, Math.max(0.1, scalpCoverage * 1.1)),
+    // A bald scalp gets no hair at all (a 0.1 floor used to sprinkle stubble over it).
+    density: scalpCoverage < 0.08 ? 0 : Math.min(1, Math.max(0.1, scalpCoverage * 1.1)),
   };
   // Medium hair (a fringe, covered temples): describe the actual cut instead
   // of snapping to the nearest preset, whose faded sides would bare the
