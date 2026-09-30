@@ -63,9 +63,18 @@ fidelity for users who've already converted.
   flow fields, a signed-distance "hair shell" that keeps hair on (and around)
   the skull, curl, flyaways and guide/child clumping. Styles are ~20 numbers
   (`HAIRSTYLE_PRESETS`), so any cut fits any head and sliders are continuous.
-* **Off the main thread.** `lib/engine/avatar.worker.ts` owns the BVH, scalp
-  samples and SDF per head; regenerating a cut takes 30–150 ms without
-  dropping a frame. Channels (`main`, `before/after`, `thumb`) are latest-wins.
+* **Off the main thread.** `lib/engine/core.ts` (run by `avatar.worker.ts`, or
+  in-thread if a browser can't start the worker) owns the BVH, scalp samples
+  and SDF per head; regenerating a cut never drops a frame. Channels (`main`,
+  `before/after`, `thumb`) are latest-wins.
+* **Baked studio lighting** (`lib/hair/shading.ts`). The head never moves
+  relative to the studio lights — the camera orbits — so hair self-shadowing
+  is precomputed like a deep opacity map: the groom is splatted into a 3 mm
+  density grid and every strand point stores its visibility of each of the
+  four lights (through hair, then a soft SDF march through the head) plus
+  its depth-in-groom occlusion. The same grid shadows the skin (fringe on the
+  forehead, scalp under a crop) and SDF cavities give the face its ambient
+  occlusion. Result: real depth in the hair at zero per-frame cost.
 * **One render pipeline** (`components/three/RenderPipeline.tsx`) per frame:
   ≤1 carousel thumbnail of *your own twin* wearing each option, the 4 live
   orthogonal previews (only when the avatar changed), then the main view or the
@@ -73,7 +82,15 @@ fidelity for users who've already converted.
   tone mapping and colour management are identical everywhere.
 * **Skin** is three.js `MeshPhysicalMaterial` with injected mask channels:
   stubble shadow, captured-beard removal ("clean shave" on a bearded scan),
-  scalp density tint, and feature-protected complexion smoothing.
+  scalp density tint, and feature-protected complexion smoothing. Direct
+  light wraps past the terminator per channel (a subsurface approximation —
+  red travels furthest), each light is scaled by its baked visibility, and a
+  thin clearcoat adds the second specular lobe of skin oil. A dark crew-neck
+  (`Shirt.tsx`) is the body mesh pushed out along its normals and cut by a
+  collar plane in the shader.
+* **Landing hero** is not real-time: a Blender Cycles path-traced loop of the
+  template twin with the engine's own groom (`scripts/cycles`), so the first
+  impression costs the phone a short video instead of a WebGL scene.
 * **Glasses / accessories** are procedural and fitted from the rig (pupils,
   sellion, temples, ear points) with real optics details (12 mm vertex
   distance, 8° pantoscopic tilt, 5° wrap).

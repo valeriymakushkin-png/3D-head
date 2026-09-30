@@ -18,6 +18,7 @@ import type { HeadAsset } from "@/lib/head/asset";
 import { buildAccessories } from "@/lib/three/accessories";
 import { buildGlasses, disposeGroup } from "@/lib/three/glasses";
 import { HeadMesh, type SkinShade } from "@/components/three/HeadMesh";
+import { Shirt } from "@/components/three/Shirt";
 import { StrandMesh } from "@/components/three/StrandMesh";
 
 function useStrands(
@@ -118,6 +119,7 @@ export function Avatar({ asset, look, quality, channel = "main", isolated = fals
         skinShade={skinShade}
         cloneGeometry={isolated}
       />
+      <Shirt asset={asset} />
       <StrandMesh name="hair" data={hair} color={hairColor} center={asset.rig.center} />
       <StrandMesh name="beard" data={beardParams ? beard : null} color={hairColor} center={asset.rig.center} darken={0.85} />
       {glasses && <primitive object={glasses} />}

@@ -17,8 +17,26 @@ let filesetPromise: Promise<Awaited<ReturnType<Vision["FilesetResolver"]["forVis
 const landmarkers = new Map<"IMAGE" | "VIDEO", Promise<FaceLandmarker>>();
 let segmenter: Promise<ImageSegmenter> | null = null;
 
+/**
+ * MediaPipe Tasks reports usage to Google (odml.pa.googleapis.com). Our CSP
+ * already blocks it — "nothing leaves your device" — but the blocked request
+ * surfaces as console errors, so answer it locally instead.
+ */
+let telemetryMuted = false;
+function muteTelemetry() {
+  if (telemetryMuted || typeof window === "undefined") return;
+  telemetryMuted = true;
+  const real = window.fetch.bind(window);
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.startsWith("https://odml.pa.googleapis.com/")) return Promise.resolve(new Response(null, { status: 204 }));
+    return real(input, init);
+  };
+}
+
 // Failed loads are not cached, so a flaky mobile connection can simply retry.
 function vision() {
+  muteTelemetry();
   visionPromise ??= import("@mediapipe/tasks-vision").catch((e) => {
     visionPromise = null;
     throw e;
