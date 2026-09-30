@@ -221,6 +221,8 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
     }
   const color = Ls.length > 50 ? labToHex(percentile(Ls, 0.6), percentile(as, 0.5), percentile(bs, 0.5)) : "#2a211b";
 
+  const cut = measureCut(front);
+
   // Map measurements to the closest preset.
   let base: NaturalHair["base"] = "textured_crop";
   let lengthClass: HairBeardEstimate["lengthClass"] = "short";
@@ -260,6 +262,29 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
     color,
     density: Math.min(1, Math.max(0.1, scalpCoverage * 1.1)),
   };
+  // Medium hair (a fringe, covered temples): describe the actual cut instead
+  // of snapping to the nearest preset, whose faded sides would bare the
+  // temples and the skin behind the ears.
+  if (scalpCoverage >= 0.25 && base !== "long" && (cut.fringe > 0.3 || cut.temple > 0.3)) {
+    const tall = Math.min(1, hairHeight / 0.25);
+    natural.base = cut.fringe > 0.3 ? "french_crop" : "textured_crop";
+    natural.lengthScale = 1;
+    natural.shape = {
+      topLength: 0.048 + 0.022 * tall + 0.006 * cut.fringe,
+      frontLength: cut.fringe > 0.3 ? 0.045 + 0.03 * cut.fringe : 0.05,
+      sideLength: 0.012 + 0.02 * cut.temple + 0.025 * cut.ears,
+      backLength: 0.03 + 0.02 * Math.max(cut.temple, cut.ears),
+      napeLength: 0.012 + 0.012 * Math.max(cut.temple, cut.ears),
+      fade: Math.max(0, Math.min(0.6, 0.7 - 1.4 * cut.temple - cut.ears)),
+      flow: cut.fringe > 0.3 ? "forward" : "side",
+      gravity: 0.25 + 0.2 * cut.fringe,
+      messiness: 0.35 + 0.2 * tall,
+      lift: 0.3,
+      volume: Math.min(0.45, Math.max(0.28, 0.1 + hairHeight * 1.2)),
+    };
+    lengthClass = "medium";
+  }
+  if (process.env.NODE_ENV !== "production") console.info("[likeness] hair", { hairHeight, scalpCoverage, fringe, sideBottom, cut, natural });
 
   // Facial hair: hair-class share and darkening of the lower face.
   const lips = LIPS_OUTER.map((i) => [lx(f, i), ly(f, i)] as [number, number]);
@@ -272,8 +297,9 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
     centreN = 0,
     lowLum = 0,
     lowN = 0;
-  for (let y = yNose; y < yChin; y += 2)
-    for (let x = lx(f, 172); x < lx(f, 397); x += 2) {
+  // (the chin may be out of frame on a tilted selfie: stay inside the image)
+  for (let y = Math.max(0, yNose); y < Math.min(H - 1, yChin); y += 2)
+    for (let x = Math.max(0, lx(f, 172)); x < Math.min(W - 1, lx(f, 397)); x += 2) {
       if (!inPoly(x, y, oval) || inPoly(x, y, lips)) continue;
       const i = Math.round(y) * W + Math.round(x);
       const hair = front.categories[i] === SEG_CLASSES.hair;
@@ -303,9 +329,75 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
     natural,
     lengthClass,
     beard: { detected, coverage: +coverage.toFixed(3) },
-    bakedBeard: Math.min(1, coverage * 1.6 + Math.max(0, 1 - darkness) * 2.5),
+    bakedBeard: finite01(coverage * 1.6 + Math.max(0, 1 - darkness) * 2.5),
   };
 }
+
+/**
+ * How the hair frames the face in the frontal photo:
+ *   fringe — how much of the forehead is covered (1 = hair down to the brows),
+ *   temple — hair over the temples (0 = faded or bare),
+ *   ears   — hair over the tops of the ears.
+ * Measured from the brows up (the tracker's top-of-face point sits on the
+ * fringe itself, so it can't be the reference).
+ */
+export function measureCut(front: SegmentedFrame): { fringe: number; temple: number; ears: number } {
+  const f = front.frame;
+  const W = f.width,
+    H = f.height;
+  const cat = (x: number, y: number) => {
+    const xi = Math.round(x),
+      yi = Math.round(y);
+    return xi < 0 || yi < 0 || xi >= W || yi >= H ? -1 : front.categories[yi * W + xi];
+  };
+  const isHair = (x: number, y: number) => cat(x, y) === SEG_CLASSES.hair;
+  const browY = [105, 334, 66, 296].reduce((a, i) => a + ly(f, i), 0) / 4;
+  const eyeY = (ly(f, 159) + ly(f, 386)) / 2;
+  const B = Math.max(1, ly(f, 152) - browY);
+  const cx = lx(f, 9);
+  const fw = Math.max(1, lx(f, 454) - lx(f, 234));
+
+  // Visible forehead per column above the brows; a fringe shortens it.
+  const heights: number[] = [];
+  for (let x = cx - fw * 0.28; x <= cx + fw * 0.28; x += Math.max(1, fw / 120)) {
+    let h = B * 0.8;
+    for (let y = browY - B * 0.04; y > browY - B * 0.8; y -= Math.max(1, B / 250)) {
+      if (isHair(x, y) && isHair(x, y - 2)) {
+        h = browY - y;
+        break;
+      }
+    }
+    heights.push(h / B);
+  }
+  // A fringe has gaps between locks: judge by the better-covered columns.
+  const forehead = heights.length ? percentile(heights, 0.35) : 0.5;
+  const fringe = Math.max(0, Math.min(1, (0.36 - forehead) / 0.24));
+
+  // Share of hair (vs skin) in a box; background and clothes don't count.
+  const share = (x0: number, x1: number, y0: number, y1: number) => {
+    let hair = 0,
+      n = 0;
+    const step = Math.max(1, fw / 100);
+    for (let y = Math.min(y0, y1); y < Math.max(y0, y1); y += step)
+      for (let x = Math.min(x0, x1); x < Math.max(x0, x1); x += step) {
+        const c = cat(x, y);
+        if (c === SEG_CLASSES.hair) hair++;
+        if (c === SEG_CLASSES.hair || c === SEG_CLASSES.faceSkin || c === SEG_CLASSES.bodySkin) n++;
+      }
+    return n > 20 ? hair / n : 0;
+  };
+  const temple =
+    (share(lx(f, 33), lx(f, 234) - fw * 0.06, browY - B * 0.28, eyeY) +
+      share(lx(f, 263), lx(f, 454) + fw * 0.06, browY - B * 0.28, eyeY)) /
+    2;
+  const ears =
+    (share(lx(f, 234) + fw * 0.02, lx(f, 234) - fw * 0.16, eyeY, eyeY + B * 0.3) +
+      share(lx(f, 454) - fw * 0.02, lx(f, 454) + fw * 0.16, eyeY, eyeY + B * 0.3)) /
+    2;
+  return { fringe, temple, ears };
+}
+
+const finite01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
 
 function percentile(v: number[], p: number) {
   const s = [...v].sort((a, b) => a - b);

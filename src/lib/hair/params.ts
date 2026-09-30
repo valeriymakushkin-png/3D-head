@@ -290,9 +290,16 @@ export const HAIRSTYLE_PRESETS: Record<Exclude<HairstyleId, "natural">, HairPara
  * The user's own hair as estimated by reconstruction (see recon/analyze.ts
  * and services/reconstruct/twinme_recon/hair.py). Stored on the avatar rig.
  */
+/** A cut measured from the photos (absolute lengths in metres); overrides the base preset. */
+export type NaturalShape = Partial<
+  Pick<HairParams, "topLength" | "frontLength" | "sideLength" | "backLength" | "napeLength" | "fade" | "fadeLow" | "fadeHigh" | "flow" | "gravity" | "messiness" | "lift" | "volume">
+>;
+
 export interface NaturalHair {
   /** Closest preset — used as the base shape. */
   base: Exclude<HairstyleId, "natural">;
+  /** The measured cut (fringe, sides, fade); absent on older twins. */
+  shape?: NaturalShape;
   /** Multiplier applied to the preset lengths. */
   lengthScale: number;
   volume: number;
@@ -333,7 +340,7 @@ export function styleSliderDefaults(style: HairstyleId, natural: NaturalHair) {
 export function resolveHairParams(look: Look["hair"], natural: NaturalHair): HairParams {
   const isNatural = look.style === "natural";
   const preset = HAIRSTYLE_PRESETS[look.style === "natural" ? natural.base : look.style];
-  const p: HairParams = { ...preset };
+  const p: HairParams = { ...preset, ...(isNatural ? natural.shape : undefined) };
 
   let scale = isNatural ? natural.lengthScale : 1;
   if (look.length !== null) scale = lengthScaleFromSlider(look.length);
@@ -344,11 +351,11 @@ export function resolveHairParams(look: Look["hair"], natural: NaturalHair): Hai
   p.sideLength *= Math.sqrt(scale);
 
   if (isNatural) {
-    p.volume = natural.volume;
+    p.volume = natural.shape?.volume ?? natural.volume;
     p.curl = natural.curl;
     p.density = natural.density;
-    // "Your hair" should look like combed, everyday hair, not a styled texture cut.
-    p.messiness = Math.min(p.messiness, 0.3);
+    // "Your hair" should look like everyday hair, not a styled texture cut.
+    p.messiness = Math.min(p.messiness, natural.shape ? 0.5 : 0.3);
     p.lift = Math.min(p.lift, 0.35);
     p.clump = Math.min(p.clump, 0.45);
   }

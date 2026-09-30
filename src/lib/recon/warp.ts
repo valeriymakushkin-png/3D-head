@@ -2,7 +2,7 @@ import { applyAffine, fitAffine, fitRbf, similarityAlign, similarityToAffine } f
 
 /**
  * Sculpts the template into the user's head:
- *   1. a ridge-regularised affine (head width / height / depth proportions),
+ *   1. a lightly regularised affine (head width / height / depth proportions),
  *   2. a Gaussian RBF displacement field through the 468 face landmarks
  *      (nose, lips, eyelids, jaw…), which decays to zero ~6 cm away so the
  *      skull and neck stay smooth.
@@ -20,7 +20,14 @@ export function warpTemplate(
 
   const sim = similarityAlign(T, F);
   const prior = similarityToAffine(sim);
-  const affine = fitAffine(T, F, undefined, N * 0.0025, prior);
+  // Light pull towards a pure similarity: a long, narrow face must stay long
+  // and narrow (a heavy prior here averaged every face towards the template's).
+  // Width/height follow the photos closely; depth (regressed by the tracker,
+  // and fragile on steeply tilted frames) leans on the template's proportions.
+  // A fit that would squash or mirror the head falls back to the similarity.
+  let affine = fitAffine(T, F, undefined, [N * 0.0006, N * 0.0006, N * 0.004], prior);
+  const s3 = Math.pow(sim.s, 3);
+  if (!(det3(affine) > 0.6 * s3 && det3(affine) < 1.6 * s3)) affine = fitAffine(T, F, undefined, N * 0.02, prior);
 
   const resid = new Float64Array(N * 3);
   let rss = 0;
@@ -58,4 +65,8 @@ export function warpTemplate(
     out[i * 3 + 2] = a[2] + d[2];
   }
   return { positions: out, affine, residualRms: Math.sqrt(rss / N) };
+}
+
+function det3(M: number[]) {
+  return M[0] * (M[5] * M[10] - M[6] * M[9]) - M[1] * (M[4] * M[10] - M[6] * M[8]) + M[2] * (M[4] * M[9] - M[5] * M[8]);
 }

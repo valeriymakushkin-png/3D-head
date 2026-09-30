@@ -185,9 +185,15 @@ export function fitAffine(
   src: ArrayLike<number>,
   dst: ArrayLike<number>,
   w?: ArrayLike<number>,
-  ridge = 0,
+  /** Pull towards `prior`: one strength, or one per output row (x, y, z). */
+  ridge: number | [number, number, number] = 0,
   prior?: number[],
 ): number[] {
+  if (Array.isArray(ridge)) {
+    // Rows share the normal matrix but not the ridge: solve them one at a time.
+    const rows = ridge.map((r) => fitAffine(src, dst, w, r, prior));
+    return [...rows[0].slice(0, 4), ...rows[1].slice(4, 8), ...rows[2].slice(8, 12)];
+  }
   const n = src.length / 3;
   const AtA = new Float64Array(16);
   const Atb = [new Float64Array(4), new Float64Array(4), new Float64Array(4)];

@@ -25,7 +25,8 @@ import { useSceneVersion } from "@/lib/engine/sceneBus";
 import { type HeadAsset, TEMPLATE, loadInstantHead, loadTemplateGeometry, loadTemplateHead, loadTexture } from "@/lib/head/asset";
 import { reconstructInstantTwin } from "@/lib/recon/reconstruct";
 import { framesFromPhotos } from "@/lib/recon/capture";
-import { syntheticCapture, syntheticScanVideo } from "./synthetic";
+import { SYNTH_SCALE, syntheticCapture, syntheticScanVideo } from "./synthetic";
+import { applySimilarity, similarityAlign } from "@/lib/recon/linalg";
 import { buildRig } from "@/lib/head/rig";
 import { autoRigMesh } from "@/lib/recon/autorig";
 
@@ -51,12 +52,13 @@ const VIEWS: Record<string, [number, number, number]> = {
 };
 
 function FixedCamera({ view }: { view: string }) {
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
   useEffect(() => {
     camera.position.set(...(VIEWS[view] ?? VIEWS.front));
     camera.lookAt(0, -0.035, 0.01);
     camera.updateProjectionMatrix();
-  }, [camera, view]);
+    invalidate();
+  }, [camera, view, invalidate]);
   return null;
 }
 
@@ -110,7 +112,11 @@ function LabScene({ recon = false }: { recon?: boolean }) {
   const [atlasUrl, setAtlasUrl] = useState<string | null>(null);
   const [shots, setShots] = useState<string[]>([]);
   const [busy, setBusy] = useState(true);
-  const view = q.get("view") ?? "34l";
+  const [view, setView] = useState(q.get("view") ?? "34l");
+  // Test harnesses shoot several angles of one reconstruction: window.__SETVIEW__("left").
+  useEffect(() => {
+    (window as unknown as { __SETVIEW__?: (v: string) => void }).__SETVIEW__ = setView;
+  }, []);
   const quality = (q.get("q") ?? "high") as QualityTier;
   const look: Look = useMemo(() => {
     let l = LookSchema.parse(DEFAULT_LOOK);
@@ -137,8 +143,11 @@ function LabScene({ recon = false }: { recon?: boolean }) {
 
   useEffect(() => {
     (async () => {
+      // /lab?nat={"shape":{…}}: try a natural-hair measurement on any head.
+      const nat = q.get("nat") ? (JSON.parse(q.get("nat")!) as Partial<HeadAsset["natural"]>) : null;
+      const withNat = (a: HeadAsset): HeadAsset => (nat ? { ...a, natural: { ...a.natural, ...nat } } : a);
       const template = await loadTemplateHead();
-      if (!recon) return setAsset(template);
+      if (!recon) return setAsset(withNat(template));
       const t0 = performance.now();
       // /lab?mode=recon&src=photos: real photos injected by a test harness as
       // window.__PHOTOS__ (data URLs), through the same import path as uploads.
@@ -159,14 +168,16 @@ function LabScene({ recon = false }: { recon?: boolean }) {
         persist: false,
       });
       setAtlasUrl(URL.createObjectURL(record.albedo));
+      (window as unknown as { __RECORD__?: unknown }).__RECORD__ = record;
       setReconLog((l) => [
         ...log,
         ...l,
         `done in ${((performance.now() - t0) / 1000).toFixed(1)}s · coverage ${(record.coverage * 100).toFixed(0)}%`,
         `face ${record.analysis.faceShape} · L/W ${record.analysis.metrics.lengthToWidth} · IPD ${record.analysis.metrics.ipdMm}mm`,
         `template L/W ${template.analysis.metrics.lengthToWidth}`,
+        ...(q.get("src") === "photos" ? [] : [groundTruthError(record.positions, record.rig.landmarks, template)]),
       ]);
-      setAsset(await loadInstantHead(record));
+      setAsset(withNat(await loadInstantHead(record)));
     })().catch((e) => {
       window.__ERR__ = String(e);
       console.error(e);
@@ -333,4 +344,38 @@ function ExportDump() {
     });
   }, [q]);
   return <pre className="p-6 text-sm text-mist-200">{status}</pre>;
+}
+
+/**
+ * Synthetic scans have a known answer (the template scaled by SYNTH_SCALE):
+ * shape error after a similarity fit, and the face's width/length ratio.
+ */
+function groundTruthError(positions: Float32Array, landmarks: ArrayLike<number>, template: HeadAsset): string {
+  const tp = template.geometry.getAttribute("position").array as Float32Array;
+  const gt = new Float64Array(tp.length);
+  for (let i = 0; i < tp.length; i += 3) {
+    gt[i] = tp[i] * SYNTH_SCALE[0];
+    gt[i + 1] = tp[i + 1] * SYNTH_SCALE[1];
+    gt[i + 2] = tp[i + 2] * SYNTH_SCALE[2];
+  }
+  const sim = similarityAlign(positions, gt);
+  const al = applySimilarity(sim, positions);
+  let all = 0,
+    face = 0,
+    nf = 0;
+  const n = positions.length / 3;
+  for (let i = 0; i < n; i++) {
+    const d2 = (al[i * 3] - gt[i * 3]) ** 2 + (al[i * 3 + 1] - gt[i * 3 + 1]) ** 2 + (al[i * 3 + 2] - gt[i * 3 + 2]) ** 2;
+    all += d2;
+    if (gt[i * 3 + 2] > 0.03) {
+      face += d2;
+      nf++;
+    }
+  }
+  const T = template.rig.landmarks;
+  const dist = (L: ArrayLike<number>, a: number, b: number, sc: readonly number[] = [1, 1, 1]) =>
+    Math.hypot((L[a * 3] - L[b * 3]) * sc[0], (L[a * 3 + 1] - L[b * 3 + 1]) * sc[1], (L[a * 3 + 2] - L[b * 3 + 2]) * sc[2]);
+  const ratio = (L: ArrayLike<number>, sc?: readonly number[]) => (dist(L, 234, 454, sc) / dist(L, 10, 152, sc)).toFixed(3);
+  const jaw = (L: ArrayLike<number>, sc?: readonly number[]) => (dist(L, 172, 397, sc) / dist(L, 10, 152, sc)).toFixed(3);
+  return `GT rms ${(Math.sqrt(all / n) * 1000).toFixed(2)}mm · face ${(Math.sqrt(face / Math.max(1, nf)) * 1000).toFixed(2)}mm · W/L ${ratio(landmarks)} (gt ${ratio(T, SYNTH_SCALE)}) · jaw/L ${jaw(landmarks)} (gt ${jaw(T, SYNTH_SCALE)})`;
 }

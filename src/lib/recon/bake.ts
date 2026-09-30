@@ -30,6 +30,7 @@ import {
   type BufferGeometry,
   type Texture,
 } from "three";
+import type { Shading } from "@/lib/recon/delight";
 
 /**
  * Multi-view texture baking on the GPU.
@@ -55,6 +56,8 @@ export interface BakeView {
   /** Skin probability (0..255), same size as the image. */
   skinMask: Uint8Array;
   gain: [number, number, number];
+  /** The photo's own lighting (see delight.ts), divided out; null = keep as shot. */
+  shading?: Shading | null;
   weight: number;
   /** Weight multiplier inside the eye/mouth mask (1 for the front photo, ~0 for others). */
   featureKeep: number;
@@ -112,6 +115,8 @@ const accumFS = /* glsl */ `
   uniform vec3 uGain;
   uniform float uWeight;
   uniform float uFeatureKeep;
+  uniform float uSH[9];
+  uniform float uDelight;
   varying vec3 vImg;
   varying vec3 vN;
   varying float vZ;
@@ -129,6 +134,13 @@ const accumFS = /* glsl */ `
     float feat = mix(1.0, uFeatureKeep, vFeat);
     float w = vis * facing * facing * facing * facing * seg * edge * uWeight * feat;
     vec3 c = texture2D(uPhoto, t).rgb * uGain;
+    if (uDelight > 0.5) {
+      // Divide out the room's light (relative to camera-facing skin); partial
+      // and clamped, so hard shadows and bad fits can't blow texels out.
+      float shade = uSH[0] + uSH[1] * n.y + uSH[2] * n.z + uSH[3] * n.x + uSH[4] * n.x * n.y + uSH[5] * n.y * n.z
+        + uSH[6] * (3.0 * n.z * n.z - 1.0) + uSH[7] * n.x * n.z + uSH[8] * (n.x * n.x - n.y * n.y);
+      c /= pow(clamp(shade, 0.5, 1.8), 0.85);
+    }
     gl_FragColor = vec4(c * w, w);
   }
 `;
@@ -220,6 +232,8 @@ export function bakeTexture(
     uGain: { value: new Vector3(1, 1, 1) },
     uWeight: { value: 1 },
     uFeatureKeep: { value: 1 },
+    uSH: { value: new Array(9).fill(0) as number[] },
+    uDelight: { value: 0 },
   };
   const depthMat = new ShaderMaterial({
     vertexShader: depthVS,
@@ -284,6 +298,8 @@ export function bakeTexture(
     U.uGain.value.set(...v.gain);
     U.uWeight.value = v.weight;
     U.uFeatureKeep.value = v.featureKeep;
+    U.uDelight.value = v.shading ? 1 : 0;
+    if (v.shading) U.uSH.value = v.shading.sh.map((c) => c / v.shading!.ref);
     mesh.material = accumMat;
     renderer.setRenderTarget(acc);
     renderer.render(scene, cam);

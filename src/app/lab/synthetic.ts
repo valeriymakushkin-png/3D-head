@@ -16,6 +16,9 @@ import { getFaceLandmarker, poseFromMatrix } from "@/lib/recon/mediapipe";
 import { binForPose, measureFrame, scoreQuality } from "@/lib/recon/poses";
 import type { CaptureFrame } from "@/lib/recon/types";
 
+/** The synthetic person: the template made narrower and longer (ground truth for recon tests). */
+export const SYNTH_SCALE = [0.93, 1.04, 1] as const;
+
 /**
  * Synthetic selfie session for pipeline QA: renders a *reshaped* copy of the
  * template (narrower, longer face) from the capture poses, then runs the
@@ -35,8 +38,8 @@ function syntheticRig(template: HeadAsset) {
   const geo = template.geometry.clone();
   const pos = geo.getAttribute("position");
   for (let i = 0; i < pos.count; i++) {
-    pos.setX(i, pos.getX(i) * 0.93);
-    pos.setY(i, pos.getY(i) * 1.04);
+    pos.setX(i, pos.getX(i) * SYNTH_SCALE[0]);
+    pos.setY(i, pos.getY(i) * SYNTH_SCALE[1]);
   }
   geo.computeVertexNormals();
   const mesh = new Mesh(geo, new MeshStandardMaterial({ map: template.albedo, roughness: 0.6 }));
@@ -45,8 +48,9 @@ function syntheticRig(template: HeadAsset) {
   const key = new DirectionalLight(0xffffff, 1.8);
   key.position.set(0.3, 0.4, 1);
   scene.add(key);
-  const camera = new PerspectiveCamera(50, W / H, 0.01, 10);
-  camera.position.set(0, -0.02, 0.42);
+  // A phone front camera at arm's length (focal ≈ 0.75 × the long side).
+  const camera = new PerspectiveCamera(67.4, W / H, 0.01, 10);
+  camera.position.set(0, -0.02, 0.3);
   camera.lookAt(0, -0.03, 0);
   const render = (yaw: number, pitch: number) => {
     mesh.rotation.set((pitch * Math.PI) / 180, (yaw * Math.PI) / 180, 0, "YXZ");

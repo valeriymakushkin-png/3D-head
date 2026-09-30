@@ -12,6 +12,7 @@ import { type InstantTwinRecord, avatarVault } from "@/lib/recon/storage";
 import type { CaptureFrame, ReconProgress } from "@/lib/recon/types";
 import { warpTemplate } from "@/lib/recon/warp";
 import { expressionMask } from "@/lib/three/masks";
+import { fitShading } from "@/lib/recon/delight";
 
 /**
  * Instant Twin — fully on-device reconstruction (~5–15 s on a phone):
@@ -69,8 +70,14 @@ export async function reconstructInstantTwin(
   // 4) cameras + per-view landmark residual fields
   report("texture", 0.55, "Projecting your photos onto the surface");
   await yield_();
-  const frontSkin = meanSkinRgb(segs[frontIdx]) ?? template.skinRgb;
-  const frontLin = linearOf(frontSkin);
+  const measuredSkin = meanSkinRgb(segs[frontIdx]) ?? template.skinRgb;
+  // Photos carry the room's exposure and colour cast, and the studio brings
+  // its own light: used raw, a dim warm room bakes in as dark orange skin.
+  // Bring the skin into the template's albedo range — exposure only part-way
+  // (darker skin must stay darker) — and ease an extreme cast towards it.
+  const albedoGain = skinCalibration(linearOf(measuredSkin), linearOf(template.skinRgb));
+  const frontLin = linearOf(measuredSkin).map((c, i) => c * albedoGain[i]) as [number, number, number];
+  const frontSkin = frontLin.map((c) => 255 * linearToSrgb(c)) as [number, number, number];
   const n = warp.positions.length / 3;
   const views: BakeView[] = frames.map((f, k) => {
     const P = toImageSpace(f);
@@ -118,9 +125,21 @@ export async function reconstructInstantTwin(
         residual[i * 2 + 1] = out[1];
       }
     }
+    const shading = fitShading({
+      positions: warp.positions,
+      normals: geometry.getAttribute("normal").array as Float32Array,
+      feat: geometry.getAttribute("aFeat").array as Float32Array,
+      affine,
+      residual,
+      skinMask: segs[k].skinMask,
+      pixels: segs[k].pixels,
+      width: f.width,
+      height: f.height,
+    });
     const viewSkin = meanSkinRgb(segs[k]);
-    const vl = viewSkin ? linearOf(viewSkin) : frontLin;
-    const gain = [0, 1, 2].map((c) => Math.min(1.4, Math.max(0.7, frontLin[c] / Math.max(1e-4, vl[c])))) as [number, number, number];
+    const vl = viewSkin ? linearOf(viewSkin) : linearOf(measuredSkin);
+    const frontRaw = linearOf(measuredSkin);
+    const gain = [0, 1, 2].map((c) => albedoGain[c] * Math.min(1.4, Math.max(0.7, frontRaw[c] / Math.max(1e-4, vl[c])))) as [number, number, number];
     return {
       image: f.image,
       width: f.width,
@@ -129,6 +148,7 @@ export async function reconstructInstantTwin(
       residual,
       skinMask: segs[k].skinMask,
       gain,
+      shading,
       // The front photo owns the face; the others fill the sides and under the chin.
       weight: k === frontIdx ? 2.5 : Math.max(0.35, f.quality.score),
       featureKeep: k === frontIdx ? 1 : 0.02,
@@ -181,9 +201,33 @@ export async function reconstructInstantTwin(
   geometry.dispose();
   report("finish", 1, "Your twin is ready");
   if (process.env.NODE_ENV !== "production") {
-    console.info("[recon]", { rms: fusion.rmsError, metric: m, warpResidual: warp.residualRms, coverage: bake.coverage, analysis });
+    console.info("[recon]", JSON.stringify({ rms: fusion.rmsError, metric: m, warpResidual: warp.residualRms, affine: warp.affine.map((v) => +v.toFixed(3)), coverage: bake.coverage, gains: views.map((v) => v.gain), shading: views.map((v) => v.shading && { ref: +v.shading.ref.toFixed(4), sh: v.shading.sh.map((c) => +(c / v.shading!.ref).toFixed(2)) }) }));
+    console.info("[likeness] skin", JSON.stringify({ measured: measuredSkin.map(Math.round), template: template.skinRgb.map(Math.round), albedoGain, frontSkin: frontSkin.map(Math.round) }));
   }
   return record;
+}
+
+const lum = (c: ArrayLike<number>) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+const linearToSrgb = (c: number) => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(0, c), 1 / 2.4) - 0.055);
+
+/**
+ * Per-channel gain (linear) from the photographed skin to an albedo: exposure
+ * 75 % of the way (in log) to the template's skin brightness — a dim room and
+ * darker skin look alike to a camera, so never all the way — and chroma 35 %
+ * of the way to the template's hue.
+ */
+export function skinCalibration(skin: [number, number, number], template: [number, number, number]): [number, number, number] {
+  const Lu = Math.max(1e-4, lum(skin)),
+    Lt = Math.max(1e-4, lum(template));
+  const expo = Math.min(2.8, Math.max(0.85, Math.pow(Lt / Lu, 0.75)));
+  const g = [0, 1, 2].map((c) => {
+    const cu = skin[c] / Lu,
+      ct = template[c] / Lt;
+    return (cu + (ct - cu) * 0.35) / Math.max(1e-4, cu);
+  });
+  // keep the chroma change luminance-neutral
+  const Lg = lum([skin[0] * g[0], skin[1] * g[1], skin[2] * g[2]]) / Lu;
+  return [0, 1, 2].map((c) => (g[c] / Lg) * expo) as [number, number, number];
 }
 
 /** Template vertex normal nearest to each landmark (for visibility weights). */

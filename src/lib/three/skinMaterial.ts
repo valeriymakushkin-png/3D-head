@@ -194,7 +194,8 @@ export function updateSkinUniforms(
   u.uComplexion.value = look.skin.complexion;
   // Remove a captured beard whenever the chosen beard is lighter than it.
   const wantsLess = look.beard.style === "clean" || look.beard.style === "stubble" || look.beard.style === "goatee";
-  u.uBeardRemove.value = wantsLess ? Math.min(1, bakedBeard * 2.2) : 0;
+  // (older twins may carry a NaN here, which would black out the whole skin)
+  u.uBeardRemove.value = wantsLess && Number.isFinite(bakedBeard) ? Math.min(1, bakedBeard * 2.2) : 0;
   u.uBeardShadow.value = beard ? beard.shadow : 0;
   const root = new Color(hairColor.root);
   u.uBeardColor.value.setRGB(0.35 + root.r * 0.9, 0.3 + root.g * 0.9, 0.28 + root.b * 0.9);
