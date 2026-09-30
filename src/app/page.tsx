@@ -72,15 +72,15 @@ const LOOKS = [
 function Hero() {
   return (
     <section className="relative md:min-h-[100svh]">
-      <div className="absolute inset-0 bg-[radial-gradient(70%_55%_at_50%_28%,#2a241f_0%,#120f0d_58%,#0b0a09_100%)] md:bg-[radial-gradient(55%_60%_at_68%_45%,#2a241f_0%,#110f0d_60%,#0b0a09_100%)]" />
+      {/* Same near-black as the video's backdrop, so the render sits in the page without a seam. */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_bottom,#110e09_0%,#110e09_70%,#0b0a09_100%)]" />
       {/* The twin: top of the screen on phones (text sits below it, never over the face), right side on desktop. */}
       <div className="absolute inset-x-0 top-0 h-[66svh] overflow-hidden md:left-auto md:right-0 md:h-[100svh] md:w-[60%]">
-        <HeroVideo className="size-full object-cover object-[50%_30%]" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-b from-transparent via-ink-950/70 to-ink-950 md:hidden" />
-        <div className="pointer-events-none absolute inset-y-0 left-0 hidden w-[28%] bg-gradient-to-r from-ink-950 to-transparent md:block" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-[22%] bg-gradient-to-b from-transparent to-ink-950 md:block" />
+        <HeroVideo className="size-full object-cover object-[50%_30%] md:object-[50%_0%]" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-b from-transparent via-[#110e09]/70 to-[#110e09] md:hidden" />
+        <div className="pointer-events-none absolute inset-y-0 left-0 hidden w-[24%] bg-gradient-to-r from-[#110e09] to-transparent md:block" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-[26%] bg-gradient-to-b from-transparent to-[#110e09] md:block" />
       </div>
-      <div className="stage-vignette absolute inset-x-0 top-0 hidden h-[100svh] md:block" />
       <div className="relative mx-auto flex max-w-7xl flex-col px-5 pt-[56svh] md:min-h-[100svh] md:justify-center md:px-8 md:pt-24">
         <Reveal className="max-w-[640px]">
           <h1 className="font-display text-[40px] font-semibold leading-[1.06] tracking-[-0.025em] md:text-[68px] md:leading-[1.03]">
