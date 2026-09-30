@@ -16,7 +16,7 @@ export function StudioStage({ environmentIntensity = 0.55 }: { environmentIntens
       ))}
       <hemisphereLight args={[AMBIENT.top, AMBIENT.bottom, 0.35]} />
       <Environment resolution={256} frames={1} environmentIntensity={environmentIntensity}>
-        <color attach="background" args={["#060607"]} />
+        <color attach="background" args={["#0b0a09"]} />
         <Lightformer form="rect" intensity={3} color="#fff3e6" position={[-2.2, 2, 3]} scale={[3, 2.2, 1]} target={[0, 0, 0]} />
         <Lightformer form="rect" intensity={0.9} color="#d9e4ff" position={[3, 0.3, 2.2]} scale={[2, 3, 1]} target={[0, 0, 0]} />
         <Lightformer form="rect" intensity={4} color="#eef3ff" position={[-2.6, 1, -2.8]} scale={[0.6, 4, 1]} target={[0, 0, 0]} />

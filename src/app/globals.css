@@ -6,35 +6,38 @@
 
 /* ==========================================================================
    TwinMe design tokens
-   Monochrome graphite + one iridescent accent reserved for AI.
+   Warm graphite, white pill actions, one iridescent accent reserved for AI.
    ========================================================================== */
 @theme {
-  --color-ink-950: #050506;
-  --color-ink-900: #09090b;
-  --color-ink-850: #0e0f12;
-  --color-ink-800: #141519;
-  --color-ink-700: #1c1e23;
-  --color-ink-600: #272a31;
-  --color-ink-500: #363a43;
-  --color-mist-50: #f6f6f8;
-  --color-mist-100: #ececf0;
-  --color-mist-200: #d6d7dd;
-  --color-mist-300: #b4b6bf;
-  --color-mist-400: #8d909a;
-  --color-mist-500: #686b75;
+  /* Warm graphite — reads like a dimly lit studio rather than a cold UI. */
+  --color-ink-950: #0b0a09;
+  --color-ink-900: #100f0d;
+  --color-ink-850: #161412;
+  --color-ink-800: #1c1a17;
+  --color-ink-700: #25221f;
+  --color-ink-600: #312d29;
+  --color-ink-500: #413c37;
+  --color-mist-50: #f7f5f2;
+  --color-mist-100: #eeebe6;
+  --color-mist-200: #d9d4cd;
+  --color-mist-300: #bab3aa;
+  --color-mist-400: #958e85;
+  --color-mist-500: #6f6961;
   --color-iris-200: #dde3ff;
   --color-iris-300: #c2ccff;
   --color-iris-400: #9fadff;
   --color-iris-500: #7d8bff;
   --color-aura-300: #ffd9bd;
   --color-aura-400: #f4bf96;
+  --color-gold-300: #f1cf8f;
+  --color-gold-400: #dcae63;
   --color-ok-400: #7ee2b0;
   --color-warn-400: #ffcf70;
   --color-err-400: #ff8a8a;
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
-  --font-display: var(--font-inter-tight), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-instrument), ui-serif, Georgia, serif;
+  /* San Francisco on Apple devices, Inter (its closest open cousin) everywhere else. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", var(--font-inter), "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
   --radius-glass: 22px;
   --radius-pill: 999px;
@@ -82,7 +85,6 @@ body {
 
 body {
   font-family: var(--font-sans);
-  font-feature-settings: "ss01", "cv11";
   overscroll-behavior: none;
 }
 
@@ -92,9 +94,9 @@ body {
 
 /* --- Glass -------------------------------------------------------------- */
 @utility glass {
-  background: linear-gradient(180deg, rgb(28 30 36 / 0.62), rgb(16 17 21 / 0.58));
+  background: linear-gradient(180deg, rgb(34 31 28 / 0.62), rgb(20 18 16 / 0.58));
   @supports not (backdrop-filter: blur(1px)) {
-    background: rgb(18 19 23 / 0.94);
+    background: rgb(22 20 18 / 0.94);
   }
   backdrop-filter: blur(28px) saturate(160%);
   -webkit-backdrop-filter: blur(28px) saturate(160%);

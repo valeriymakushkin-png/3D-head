@@ -50,5 +50,5 @@ function PreviewCanvas({ id }: { id: (typeof PREVIEW_VIEWS)[number]["id"] }) {
       if (previewTargets.get(id) === c) previewTargets.delete(id);
     };
   }, [id]);
-  return <canvas ref={ref} className="absolute inset-0 size-full bg-[radial-gradient(80%_70%_at_50%_40%,#1b1c21,#0b0b0d)]" />;
+  return <canvas ref={ref} className="absolute inset-0 size-full bg-[radial-gradient(80%_70%_at_50%_40%,#211e1b,#0d0c0b)]" />;
 }

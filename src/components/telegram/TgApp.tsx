@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAccount } from "@/lib/account";
 import { setBearer } from "@/lib/api/fetch";
 import { getActiveAvatarId } from "@/lib/recon/storage";
@@ -12,6 +12,8 @@ import { IconTelegram } from "@/components/ui/icons";
 import { Wordmark } from "@/components/ui/Logo";
 
 type Mode = "boot" | "create" | "studio";
+
+const TG_BOT = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
 
 /**
  * Telegram Mini App shell: native chrome integration (fullscreen, safe areas,
@@ -26,10 +28,14 @@ export function TgApp() {
 
   // 1) runtime + chrome
   useEffect(() => {
+    // Telegram launches Mini Apps with #tgWebAppData=… in the URL, so we know we're inside
+    // Telegram before its SDK script arrives — and wait for it on slow mobile networks.
+    const launchedByTelegram = /tgWebApp(Data|Platform|Version)=/.test(window.location.hash + window.location.search);
+    const maxTries = launchedByTelegram ? 300 : 40; // 15 s vs 2 s
     let tries = 0;
     const t = setInterval(() => {
       const w = window.Telegram?.WebApp;
-      if (w || ++tries > 40) {
+      if ((w && (w.initData || !launchedByTelegram)) || ++tries > maxTries) {
         clearInterval(t);
         if (!w || !w.initData) {
           setOutside(true);
@@ -40,9 +46,9 @@ export function TgApp() {
         w.expand();
         w.disableVerticalSwipes?.();
         if (/android|ios/.test(w.platform) && w.isVersionAtLeast("8.0")) w.requestFullscreen?.();
-        w.setHeaderColor("#050506");
-        w.setBackgroundColor("#050506");
-        w.setBottomBarColor?.("#050506");
+        w.setHeaderColor("#0b0a09");
+        w.setBackgroundColor("#0b0a09");
+        w.setBottomBarColor?.("#0b0a09");
         const applyInsets = () => {
           const s = w.safeAreaInset ?? { top: 0, bottom: 0 };
           const c = w.contentSafeAreaInset ?? { top: 0, bottom: 0 };
@@ -57,9 +63,11 @@ export function TgApp() {
     return () => clearInterval(t);
   }, [q]);
 
-  // 2) sign-in with initData
+  // 2) sign-in with initData (once per launch; later URL changes only switch views)
+  const signedIn = useRef(false);
   useEffect(() => {
-    if (!tg) return;
+    if (!tg || signedIn.current) return;
+    signedIn.current = true;
     (async () => {
       try {
         const res = await fetch("/api/auth/telegram", {
@@ -94,10 +102,12 @@ export function TgApp() {
     return () => tg.BackButton.offClick(back);
   }, [tg, mode]);
 
-  // Created a twin → studio (CreateFlow navigates to /tg?avatar=…)
+  // Created a twin → studio (CreateFlow navigates to /tg?avatar=…); "New scan" → /tg?create=1
   useEffect(() => {
     if (q.get("avatar") && mode === "create") setMode("studio");
-  }, [q, mode]);
+    else if (q.get("create") && mode === "studio") setMode("create");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
 
   if (mode === "boot") {
     return (
@@ -108,9 +118,9 @@ export function TgApp() {
   }
   return (
     <>
-      {outside && mode === "studio" && (
+      {outside && mode === "studio" && TG_BOT && (
         <a
-          href={`https://t.me/${process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "TwinMeAIBot"}/app`}
+          href={`https://t.me/${TG_BOT}?startapp`}
           className="glass fixed bottom-3 left-3 z-[60] hidden items-center gap-2 rounded-full px-3 py-1.5 text-[12px] text-mist-200 md:flex"
         >
           <IconTelegram size={14} className="text-[#58a6ff]" /> Open in Telegram

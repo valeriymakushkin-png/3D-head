@@ -59,14 +59,18 @@ export function CreateFlow({ studioPath = "/studio" }: { studioPath?: string }) 
       <AnimatePresence mode="wait">
         {step === "choose" && (
           <motion.section key="choose" exit={{ opacity: 0 }} className="relative mx-auto flex min-h-dvh max-w-5xl flex-col px-5 pb-10 pt-[calc(var(--tg-safe-top)+20px)] md:px-8">
-            <div className="absolute inset-0 -z-10 bg-[radial-gradient(60%_50%_at_50%_20%,#1a1b21,transparent)]" />
-            <Link href="/" className="self-start">
-              <Wordmark />
-            </Link>
+            <div className="absolute inset-0 -z-10 bg-[radial-gradient(60%_50%_at_50%_20%,#231f1b,transparent)]" />
+            {studioPath.startsWith("/tg") ? (
+              <Wordmark className="self-start" />
+            ) : (
+              <Link href="/" className="self-start">
+                <Wordmark />
+              </Link>
+            )}
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, ease: easeOut }} className="mt-[10vh]">
               <p className="text-[12px] font-medium uppercase tracking-[0.16em] text-mist-500">Step 1 of 2</p>
-              <h1 className="mt-3 max-w-2xl font-display text-[40px] font-semibold leading-[1.05] tracking-[-0.035em] md:text-[56px]">
-                Let&apos;s capture <span className="font-serif font-normal italic text-mist-300">you</span>, in 3D.
+              <h1 className="mt-3 max-w-2xl font-display text-[40px] font-semibold leading-[1.05] tracking-[-0.02em] md:text-[56px]">
+                Let&apos;s capture <span className="text-mist-300">you</span>, in 3D.
               </h1>
               <p className="mt-4 max-w-lg text-[16px] leading-7 text-mist-400">Seven angles are all it takes. We fuse them into a sculpted head and a 2K skin texture — on this device.</p>
             </motion.div>

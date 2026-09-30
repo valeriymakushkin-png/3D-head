@@ -17,24 +17,61 @@ let filesetPromise: Promise<Awaited<ReturnType<Vision["FilesetResolver"]["forVis
 const landmarkers = new Map<"IMAGE" | "VIDEO", Promise<FaceLandmarker>>();
 let segmenter: Promise<ImageSegmenter> | null = null;
 
+// Failed loads are not cached, so a flaky mobile connection can simply retry.
 function vision() {
-  visionPromise ??= import("@mediapipe/tasks-vision");
+  visionPromise ??= import("@mediapipe/tasks-vision").catch((e) => {
+    visionPromise = null;
+    throw e;
+  });
   return visionPromise;
 }
 
 async function fileset() {
   const v = await vision();
-  filesetPromise ??= v.FilesetResolver.forVisionTasks(WASM_PATH);
+  filesetPromise ??= v.FilesetResolver.forVisionTasks(WASM_PATH).catch((e) => {
+    filesetPromise = null;
+    throw e;
+  });
   return filesetPromise;
 }
 
+/**
+ * Every iOS browser is WebKit, whose WebGL path in MediaPipe is unreliable
+ * (the GPU delegate can initialise and then silently find no faces). The
+ * CPU (XNNPACK) delegate is fast enough there for 30 fps face tracking.
+ */
+export function isAppleMobile(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+let forceCpu = isAppleMobile();
+
 async function withGpuFallback<T>(make: (delegate: "GPU" | "CPU") => Promise<T>): Promise<T> {
+  if (forceCpu) return make("CPU");
   try {
     return await make("GPU");
   } catch (err) {
     console.warn("[mediapipe] GPU delegate unavailable, falling back to CPU", err);
     return make("CPU");
   }
+}
+
+/**
+ * Drops cached landmarkers and uses the CPU delegate from now on — for when
+ * the GPU delegate initialised but fails at inference time.
+ */
+export function fallBackToCpu() {
+  if (forceCpu) return false;
+  forceCpu = true;
+  for (const p of landmarkers.values()) p.then((l) => l.close()).catch(() => undefined);
+  landmarkers.clear();
+  return true;
+}
+
+/** Downloads the WASM runtime + face model ahead of time (e.g. while the camera starts). */
+export function preloadFaceTracking() {
+  getFaceLandmarker("VIDEO").catch(() => undefined);
 }
 
 export function getFaceLandmarker(mode: "IMAGE" | "VIDEO"): Promise<FaceLandmarker> {
@@ -56,6 +93,7 @@ export function getFaceLandmarker(mode: "IMAGE" | "VIDEO"): Promise<FaceLandmark
       );
     })();
     landmarkers.set(mode, p);
+    p.catch(() => landmarkers.get(mode) === p && landmarkers.delete(mode));
   }
   return p;
 }

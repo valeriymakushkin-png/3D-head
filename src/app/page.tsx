@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { HeroTwinLazy } from "@/components/landing/HeroTwinLazy";
 import { Reveal } from "@/components/landing/Reveal";
-import { IconCheck, IconCube, IconHd, IconShield, IconSparkle, IconTelegram, IconWand } from "@/components/ui/icons";
+import { IconCheck, IconChevron, IconCube, IconHd, IconShield, IconSparkle, IconTelegram, IconWand } from "@/components/ui/icons";
 import { Wordmark } from "@/components/ui/Logo";
 
-const TG_BOT = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "TwinMeAIBot";
+const TG_BOT = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
+/** Opens the bot's main Mini App (BotFather → Bot Settings → Configure Mini App). */
+const TG_APP_URL = TG_BOT ? `https://t.me/${TG_BOT}?startapp` : null;
 
 export default function Landing() {
   return (
@@ -23,7 +25,7 @@ export default function Landing() {
 
 function Nav() {
   return (
-    <header className="fixed inset-x-0 top-0 z-50">
+    <header className="fixed inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 md:px-8">
         <Link href="/" aria-label="TwinMe home">
           <Wordmark />
@@ -41,10 +43,15 @@ function Nav() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
-          <Link href="/login" className="hidden rounded-full px-4 py-2 text-[13px] text-mist-300 hover:text-mist-50 sm:block">
+          <Link href="/login" className="rounded-full px-3 py-2 text-[14px] font-medium text-mist-100 hover:text-white">
             Sign in
           </Link>
-          <Link href="/create" className="rounded-full bg-mist-50 px-4 py-2 text-[13px] font-medium text-ink-950 transition-transform hover:scale-[1.03]">
+          {TG_APP_URL && (
+            <a href={TG_APP_URL} aria-label="Open in Telegram" className="grid size-9 place-items-center rounded-full bg-[#2aabee] text-white transition-transform hover:scale-105">
+              <IconTelegram size={18} />
+            </a>
+          )}
+          <Link href="/create" className="hidden rounded-full bg-mist-50 px-4 py-2 text-[13px] font-medium text-ink-950 transition-transform hover:scale-[1.03] md:block">
             Create my twin
           </Link>
         </div>
@@ -53,43 +60,88 @@ function Nav() {
   );
 }
 
+const LOOKS = [
+  { src: "/looks/quiff.jpg", label: "Quiff" },
+  { src: "/looks/pompadour.jpg", label: "Pompadour" },
+  { src: "/looks/textured-crop.jpg", label: "Textured Crop" },
+  { src: "/looks/undercut-platinum.jpg", label: "Undercut" },
+  { src: "/looks/buzz-aviator.jpg", label: "Buzz Cut" },
+  { src: "/looks/french-crop.jpg", label: "French Crop" },
+];
+
 function Hero() {
   return (
-    <section className="relative min-h-[100svh]">
-      <div className="absolute inset-0 bg-[radial-gradient(55%_60%_at_68%_45%,#1b1c22_0%,#0a0a0c_60%,#050506_100%)]" />
-      <div className="absolute inset-y-0 right-0 w-full md:w-[62%]">
+    <section className="relative md:min-h-[100svh]">
+      <div className="absolute inset-0 bg-[radial-gradient(70%_55%_at_50%_28%,#2a241f_0%,#120f0d_58%,#0b0a09_100%)] md:bg-[radial-gradient(55%_60%_at_68%_45%,#2a241f_0%,#110f0d_60%,#0b0a09_100%)]" />
+      {/* The twin: top of the screen on phones (text sits below it, never over the face), right side on desktop. */}
+      <div className="absolute inset-x-0 top-0 h-[66svh] md:left-auto md:right-0 md:h-[100svh] md:w-[60%]">
         <HeroTwinLazy />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-b from-transparent via-ink-950/70 to-ink-950 md:hidden" />
       </div>
-      <div className="stage-vignette absolute inset-0" />
-      <div className="relative mx-auto flex min-h-[100svh] max-w-7xl flex-col justify-end px-5 pb-16 pt-28 md:justify-center md:px-8 md:pb-0">
-        <Reveal className="max-w-[560px]">
-          <p className="glass-soft inline-flex items-center gap-2 rounded-full px-3 py-1 text-[12px] text-mist-300">
-            <span className="size-1.5 rounded-full bg-iris-400" /> Real 3D. Built from your own photos.
-          </p>
-          <h1 className="mt-6 font-display text-[52px] font-semibold leading-[0.98] tracking-[-0.045em] md:text-[84px]">
-            Meet your
+      <div className="stage-vignette absolute inset-x-0 top-0 hidden h-[100svh] md:block" />
+      <div className="relative mx-auto flex max-w-7xl flex-col px-5 pt-[56svh] md:min-h-[100svh] md:justify-center md:px-8 md:pt-24">
+        <Reveal className="max-w-[640px]">
+          <h1 className="font-display text-[40px] font-semibold leading-[1.06] tracking-[-0.025em] md:text-[68px] md:leading-[1.03]">
+            Your Digital Twin
             <br />
-            <span className="font-serif font-normal italic tracking-[-0.02em] text-mist-300">digital twin.</span>
+            <span className="text-mist-400">for a Better You</span>
           </h1>
-          <p className="mt-6 max-w-[440px] text-[17px] leading-7 text-mist-400">
-            A photoreal 3D model of your head from a 15-second selfie scan. Try any haircut, beard, colour or frames — on <em className="not-italic text-mist-100">you</em>, in real time,
-            before you commit.
+          <p className="mt-4 max-w-[460px] text-[16px] leading-6 text-mist-300 md:mt-6 md:text-[18px] md:leading-7">
+            A realistic 3D model of your head from a 15-second selfie scan. Try unlimited haircuts, beards, colours and glasses on yourself — in real time.
           </p>
-          <div className="mt-9 flex flex-wrap items-center gap-3">
-            <Link href="/create" className="group inline-flex h-13 items-center gap-2 rounded-full bg-mist-50 px-7 text-[15px] font-medium text-ink-950 shadow-[0_18px_60px_-18px_rgba(255,255,255,0.5)] transition-transform hover:scale-[1.02]">
-              Create my 3D twin
-              <span className="transition-transform group-hover:translate-x-0.5">→</span>
+          <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Link
+              href="/create"
+              className="group inline-flex h-14 items-center justify-between gap-3 rounded-full bg-mist-50 pl-7 pr-5 text-[16px] font-semibold text-ink-950 shadow-[0_18px_60px_-18px_rgba(255,255,255,0.45)] transition-transform hover:scale-[1.02] sm:justify-center"
+            >
+              Create My 3D Twin
+              <IconChevron size={18} className="transition-transform group-hover:translate-x-0.5" />
             </Link>
-            <a href={`https://t.me/${TG_BOT}/app`} className="glass inline-flex h-13 items-center gap-2 rounded-full px-6 text-[15px] text-mist-100 transition-colors hover:bg-white/[0.07]">
-              <IconTelegram size={18} className="text-[#58a6ff]" /> Open in Telegram
-            </a>
+            <Link href="/studio?demo=1" className="inline-flex h-12 items-center justify-center rounded-full px-5 text-[15px] font-medium text-mist-200 transition-colors hover:text-white sm:h-14">
+              Try the demo twin
+            </Link>
           </div>
-          <p className="mt-6 text-[13px] text-mist-500">
-            Free to start · Private by design · <Link href="/studio?demo=1" className="text-mist-300 underline-offset-4 hover:underline">try the demo twin</Link>
-          </p>
         </Reveal>
       </div>
+      <LookStrip />
+      <FeatureRow />
     </section>
+  );
+}
+
+/** Real renders from the engine — the same strand hair you get on your own twin. */
+function LookStrip() {
+  return (
+    <div className="relative mt-10 md:mx-auto md:mt-0 md:max-w-7xl md:px-8 md:pb-10">
+      <div className="no-scrollbar flex snap-x gap-3 overflow-x-auto px-5 pb-1 md:grid md:grid-cols-6 md:overflow-visible md:px-0">
+        {LOOKS.map((l) => (
+          <figure key={l.src} className="w-[38%] shrink-0 snap-start sm:w-[24%] md:w-auto">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={l.src} alt={`${l.label} on a 3D twin`} width={360} height={440} loading="lazy" className="aspect-[9/11] w-full rounded-[18px] bg-ink-800 object-cover" />
+            <figcaption className="mt-2 truncate text-center text-[12px] text-mist-300">{l.label}</figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FeatureRow() {
+  const items = [
+    { icon: <IconSparkle size={20} />, label: "AI Stylist" },
+    { icon: <IconCube size={20} />, label: "Real 3D" },
+    { icon: <IconShield size={20} />, label: "Private" },
+    { icon: <IconHd size={20} />, label: "HD Export" },
+  ];
+  return (
+    <div className="relative mx-auto grid max-w-md grid-cols-4 gap-2 px-5 pb-16 pt-10 md:hidden">
+      {items.map((it) => (
+        <div key={it.label} className="flex flex-col items-center gap-2">
+          <span className="grid size-12 place-items-center rounded-full border border-white/[0.08] bg-white/[0.05] text-mist-100">{it.icon}</span>
+          <span className="text-[12px] text-mist-300">{it.label}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -102,8 +154,9 @@ function HowItWorks() {
   return (
     <section id="how" className="relative mx-auto max-w-7xl px-5 py-28 md:px-8 md:py-40">
       <Reveal>
-        <h2 className="max-w-2xl font-display text-[38px] font-semibold leading-[1.05] tracking-[-0.035em] md:text-[56px]">
-          From selfie to twin <span className="font-serif font-normal italic text-mist-400">in under a minute.</span>
+        <h2 className="max-w-2xl font-display text-[38px] font-semibold leading-[1.05] tracking-[-0.02em] md:text-[56px]">
+          From selfie to twin<br />
+          <span className="text-mist-400">in under a minute.</span>
         </h2>
       </Reveal>
       <div className="mt-16 grid gap-10 md:grid-cols-3 md:gap-8">
@@ -175,8 +228,9 @@ function Pros() {
       <div className="mx-auto grid max-w-7xl gap-12 px-5 py-28 md:grid-cols-2 md:px-8 md:py-36">
         <Reveal>
           <p className="text-[12px] font-medium uppercase tracking-[0.16em] text-mist-500">For professionals</p>
-          <h2 className="mt-4 font-display text-[38px] font-semibold leading-[1.05] tracking-[-0.035em] md:text-[52px]">
-            The consultation, <span className="font-serif font-normal italic text-mist-400">before the cut.</span>
+          <h2 className="mt-4 font-display text-[38px] font-semibold leading-[1.05] tracking-[-0.02em] md:text-[52px]">
+            The consultation,<br />
+            <span className="text-mist-400">before the cut.</span>
           </h2>
           <p className="mt-5 max-w-md text-[16px] leading-7 text-mist-400">
             Barbers show clients the result on their own head before picking up the clippers. Hair-restoration clinics simulate hairline and density, then send a report.
@@ -212,7 +266,7 @@ function Pricing() {
   return (
     <section id="pricing" className="mx-auto max-w-7xl px-5 py-28 md:px-8 md:py-40">
       <Reveal>
-        <h2 className="font-display text-[38px] font-semibold tracking-[-0.035em] md:text-[52px]">Pricing</h2>
+        <h2 className="font-display text-[38px] font-semibold tracking-[-0.02em] md:text-[52px]">Pricing</h2>
         <p className="mt-3 text-[16px] text-mist-400">Monthly. Cancel anytime. In Telegram, pay with Stars.</p>
       </Reveal>
       <div className="mt-12 grid gap-3 md:grid-cols-4">
@@ -220,7 +274,7 @@ function Pricing() {
           <Reveal key={p.name} delay={i * 0.06}>
             <div className={`flex h-full flex-col rounded-[28px] p-6 ${p.featured ? "glass ai-ring" : "glass-soft"}`}>
               <h3 className="text-[15px] font-semibold">{p.name}</h3>
-              <p className="mt-3 font-display text-[40px] font-semibold tracking-[-0.03em]">
+              <p className="mt-3 font-display text-[40px] font-semibold tracking-[-0.015em]">
                 {p.price}
                 <span className="text-[14px] font-normal text-mist-500">/mo</span>
               </p>
@@ -249,8 +303,9 @@ function Closing() {
       <div className="absolute inset-0 bg-[radial-gradient(50%_80%_at_50%_100%,rgba(159,173,255,0.12),transparent)]" />
       <div className="relative mx-auto max-w-4xl px-5 py-32 text-center md:py-44">
         <Reveal>
-          <h2 className="font-display text-[44px] font-semibold leading-[1] tracking-[-0.04em] md:text-[72px]">
-            See it on you <span className="font-serif font-normal italic text-mist-400">first.</span>
+          <h2 className="font-display text-[44px] font-semibold leading-[1] tracking-[-0.022em] md:text-[72px]">
+            See it on you<br />
+            <span className="text-mist-400">first.</span>
           </h2>
           <Link href="/create" className="mt-10 inline-flex h-13 items-center rounded-full bg-mist-50 px-8 text-[15px] font-medium text-ink-950 transition-transform hover:scale-[1.03]">
             Create my 3D twin

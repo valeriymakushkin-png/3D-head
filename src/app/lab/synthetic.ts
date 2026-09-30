@@ -22,7 +22,8 @@ import type { CaptureFrame } from "@/lib/recon/types";
  * production landmarker on each render. Reconstruction must recover the
  * reshaped proportions, not the template's.
  */
-export async function syntheticCapture(template: HeadAsset): Promise<{ frames: CaptureFrame[]; log: string[] }> {
+/** Reshaped template head in a neutral "selfie" setup (720×960, 50° FOV). */
+function syntheticRig(template: HeadAsset) {
   const W = 720,
     H = 960;
   const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -47,7 +48,54 @@ export async function syntheticCapture(template: HeadAsset): Promise<{ frames: C
   const camera = new PerspectiveCamera(50, W / H, 0.01, 10);
   camera.position.set(0, -0.02, 0.42);
   camera.lookAt(0, -0.03, 0);
+  const render = (yaw: number, pitch: number) => {
+    mesh.rotation.set((pitch * Math.PI) / 180, (yaw * Math.PI) / 180, 0, "YXZ");
+    renderer.render(scene, camera);
+    return renderer.domElement;
+  };
+  const dispose = () => {
+    renderer.dispose();
+    renderer.forceContextLoss();
+  };
+  return { W, H, render, dispose };
+}
 
+/**
+ * A scripted head turn (front → left → right → up → down) at `fps`, as JPEG
+ * data URLs — fed to Chromium's fake camera to test the live guided scan.
+ */
+export function syntheticScanVideo(template: HeadAsset, fps = 15): { width: number; height: number; frames: string[] } {
+  const { W, H, render, dispose } = syntheticRig(template);
+  // [yaw, pitch, seconds to get there, seconds to hold]
+  const path: Array<[number, number, number, number]> = [
+    [0, 0, 0, 1.2],
+    [28, 0, 1.2, 0.8],
+    [52, 0, 1, 0.8],
+    [0, 0, 1.6, 0.3],
+    [-28, 0, 1.2, 0.8],
+    [-52, 0, 1, 0.8],
+    [0, 0, 1.6, 0.3],
+    [0, -16, 1, 0.8],
+    [0, 16, 1.6, 0.8],
+    [0, 0, 1, 1],
+  ];
+  const frames: string[] = [];
+  let [py, pp] = [0, 0];
+  for (const [yaw, pitch, move, hold] of path) {
+    const n = Math.round(move * fps);
+    for (let i = 1; i <= n; i++) {
+      const t = 0.5 - 0.5 * Math.cos((Math.PI * i) / n);
+      frames.push(render(py + (yaw - py) * t, pp + (pitch - pp) * t).toDataURL("image/jpeg", 0.9));
+    }
+    for (let i = 0; i < Math.round(hold * fps); i++) frames.push(render(yaw, pitch).toDataURL("image/jpeg", 0.9));
+    [py, pp] = [yaw, pitch];
+  }
+  dispose();
+  return { width: W, height: H, frames };
+}
+
+export async function syntheticCapture(template: HeadAsset): Promise<{ frames: CaptureFrame[]; log: string[] }> {
+  const { W, H, render, dispose } = syntheticRig(template);
   const detector = await getFaceLandmarker("IMAGE");
   const poses: Array<[number, number]> = [
     [0, 0],
@@ -61,12 +109,10 @@ export async function syntheticCapture(template: HeadAsset): Promise<{ frames: C
   const frames: CaptureFrame[] = [];
   const log: string[] = [];
   for (const [yaw, pitch] of poses) {
-    mesh.rotation.set((pitch * Math.PI) / 180, (yaw * Math.PI) / 180, 0, "YXZ");
-    renderer.render(scene, camera);
     const canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
-    canvas.getContext("2d")!.drawImage(renderer.domElement, 0, 0);
+    canvas.getContext("2d")!.drawImage(render(yaw, pitch), 0, 0);
     const res = detector.detect(canvas);
     if (!res.faceLandmarks.length) {
       log.push(`yaw ${yaw} pitch ${pitch}: no face`);
@@ -91,7 +137,6 @@ export async function syntheticCapture(template: HeadAsset): Promise<{ frames: C
       bin: bin?.id ?? "front",
     });
   }
-  renderer.dispose();
-  renderer.forceContextLoss();
+  dispose();
   return { frames, log };
 }

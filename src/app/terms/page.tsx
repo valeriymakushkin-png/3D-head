@@ -18,7 +18,7 @@ export default function Terms() {
       <Link href="/">
         <Wordmark />
       </Link>
-      <h1 className="mt-12 font-display text-[40px] font-semibold tracking-[-0.03em] text-mist-50">Terms</h1>
+      <h1 className="mt-12 font-display text-[40px] font-semibold tracking-[-0.015em] text-mist-50">Terms</h1>
       {terms.map(([h, p]) => (
         <section key={h} className="mt-10">
           <h2 className="text-[17px] font-semibold text-mist-50">{h}</h2>

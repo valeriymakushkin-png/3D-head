@@ -31,7 +31,7 @@ export function TopBar({ onGlowUp, hideBrand = false }: { onGlowUp: () => void; 
           </Link>
         )}
         {asset && (
-          <Link href="/create" className="glass-soft hidden items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-[12px] text-mist-300 hover:text-mist-100 lg:flex">
+          <Link href={hideBrand ? "/tg?create=1" : "/create"} className="glass-soft hidden items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-[12px] text-mist-300 hover:text-mist-100 lg:flex">
             <span className="size-5 rounded-full bg-[radial-gradient(circle_at_35%_30%,#d8b69b,#6b4c3b)]" />
             {asset.kind === "template" ? "Demo twin · scan yours" : asset.kind === "hd" ? "HD twin" : "Instant twin"}
           </Link>

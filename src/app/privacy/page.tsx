@@ -19,7 +19,7 @@ export default function Privacy() {
       <Link href="/">
         <Wordmark />
       </Link>
-      <h1 className="mt-12 font-display text-[40px] font-semibold tracking-[-0.03em] text-mist-50">Privacy</h1>
+      <h1 className="mt-12 font-display text-[40px] font-semibold tracking-[-0.015em] text-mist-50">Privacy</h1>
       <p className="mt-3 text-[15px] text-mist-400">Your face is yours. This is how we keep it that way.</p>
       {sections.map(([h, p]) => (
         <section key={h} className="mt-10">

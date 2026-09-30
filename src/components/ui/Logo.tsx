@@ -17,11 +17,9 @@ export function LogoMark({ size = 28, className }: { size?: number; className?: 
 
 export function Wordmark({ className }: { className?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <LogoMark />
-      <span className="font-display text-[17px] font-semibold tracking-[-0.03em] text-mist-50">
-        TwinMe<span className="text-mist-500">.ai</span>
-      </span>
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <LogoMark size={24} />
+      <span className="font-display text-[19px] font-semibold tracking-[-0.01em] text-mist-50">TwinMe</span>
     </span>
   );
 }

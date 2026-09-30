@@ -185,7 +185,10 @@ export function buildGlasses(style: Exclude<GlassesId, "none">, rig: HeadRig, ti
   const lensW = spec.lensW * k;
   const lensH = spec.lensH * k;
   const eyeY = (eyeL[1] + eyeR[1]) / 2 + spec.yOffset;
-  const lensZ = Math.max(eyeL[2], eyeR[2]) + 0.012;
+  const tilt = (-8 * Math.PI) / 180;
+  // 12 mm in front of the eyes, and the (tilted-back) top rim must clear the brow ridge.
+  const browZ = Math.max(lmk(rig, LM.browL)[2], lmk(rig, LM.browR)[2]);
+  const lensZ = Math.max(Math.max(eyeL[2], eyeR[2]) + 0.012, browZ + 0.005 + (lensH / 2) * Math.sin(-tilt));
   const lensCx = (pd / 2) * (0.5 + 0.5 * ((bridgeW + lensW) / pd));
 
   const frameMat = spec.frame();
@@ -193,7 +196,6 @@ export function buildGlasses(style: Exclude<GlassesId, "none">, rig: HeadRig, ti
   const tint = tintOverride ?? spec.defaultTint;
   const lensMat = lensMaterial(tint, spec.tintColor);
 
-  const tilt = (-8 * Math.PI) / 180;
   const wrap = (5 * Math.PI) / 180;
   const outline = spec.outline(lensW, lensH);
   // Lens base curve (sag = k·r²); acetate fronts are flat so their lenses are too.

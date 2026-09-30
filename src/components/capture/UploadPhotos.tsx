@@ -46,7 +46,7 @@ export function UploadPhotos({ onDone, onBack }: { onDone: (frames: CaptureFrame
       <button onClick={onBack} className="self-start text-[13px] text-mist-400 hover:text-mist-100">
         ← Back
       </button>
-      <h1 className="mt-6 font-display text-[34px] font-semibold leading-tight tracking-[-0.03em]">Upload your angles</h1>
+      <h1 className="mt-6 font-display text-[34px] font-semibold leading-tight tracking-[-0.015em]">Upload your angles</h1>
       <p className="mt-2 max-w-md text-[15px] leading-6 text-mist-400">
         5–15 photos of your head from different sides, or one 15-second selfie video turning slowly. Even light, no hats, glasses off.
       </p>

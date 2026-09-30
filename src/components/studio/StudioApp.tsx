@@ -48,6 +48,11 @@ async function loadActiveAsset(requested: string | null, demo: boolean): Promise
   return loadTemplateHead();
 }
 
+/** Inside the Telegram Mini App every navigation must stay under /tg (Telegram Web frames only /tg). */
+function createHref() {
+  return typeof window !== "undefined" && window.location.pathname.startsWith("/tg") ? "/tg?create=1" : "/create";
+}
+
 export function StudioApp({ embedded = false }: { embedded?: boolean }) {
   const asset = useStudio((s) => s.asset);
   const assetError = useStudio((s) => s.assetError);
@@ -102,7 +107,7 @@ export function StudioApp({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-ink-950 text-mist-100">
-      <div className="absolute inset-0 bg-[radial-gradient(70%_60%_at_50%_42%,#1a1b20_0%,#0b0b0d_55%,#050506_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(70%_60%_at_50%_42%,#221f1b_0%,#0e0d0b_55%,#0b0a09_100%)]" />
       <div className="absolute inset-x-0 top-[8%] mx-auto h-[70%] w-[60%] animate-breathe rounded-full bg-[radial-gradient(closest-side,rgba(159,173,255,0.07),transparent)] blur-2xl" />
       <StudioScene />
       <div className="stage-vignette absolute inset-0" />
@@ -114,7 +119,7 @@ export function StudioApp({ embedded = false }: { embedded?: boolean }) {
           <div>
             <p className="text-mist-200">We couldn&apos;t open your twin.</p>
             <p className="mt-1 text-[13px] text-mist-500">{assetError}</p>
-            <Link href="/create" className="mt-4 inline-block text-iris-300">
+            <Link href={createHref()} className="mt-4 inline-block text-iris-300">
               Scan again
             </Link>
           </div>
@@ -174,7 +179,7 @@ function ToolRail() {
       >
         <IconCompare size={18} />
       </RailButton>
-      <Link href="/create" className="glass mt-2 grid size-11 place-items-center rounded-full text-mist-300 hover:text-mist-50" aria-label="New scan" title="New scan">
+      <Link href={createHref()} className="glass mt-2 grid size-11 place-items-center rounded-full text-mist-300 hover:text-mist-50" aria-label="New scan" title="New scan">
         <IconCamera size={18} />
       </Link>
     </motion.div>

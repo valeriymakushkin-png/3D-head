@@ -21,7 +21,7 @@ import type { QualityTier } from "@/lib/engine/protocol";
 import { useSceneVersion } from "@/lib/engine/sceneBus";
 import { type HeadAsset, TEMPLATE, loadInstantHead, loadTemplateGeometry, loadTemplateHead, loadTexture } from "@/lib/head/asset";
 import { reconstructInstantTwin } from "@/lib/recon/reconstruct";
-import { syntheticCapture } from "./synthetic";
+import { syntheticCapture, syntheticScanVideo } from "./synthetic";
 import { buildRig } from "@/lib/head/rig";
 import { autoRigMesh } from "@/lib/recon/autorig";
 
@@ -42,6 +42,8 @@ const VIEWS: Record<string, [number, number, number]> = {
   "34r": [-0.6, 0.06, 0.62],
   top: [0, 0.8, 0.35],
   close: [0.12, 0.0, 0.42],
+  /** Slightly above eye level, 3/4 left — used for the landing look renders. */
+  hero: [0.56, 0.2, 0.68],
 };
 
 function FixedCamera({ view }: { view: string }) {
@@ -163,7 +165,7 @@ function LabScene({ recon = false }: { recon?: boolean }) {
   }, [asset, busy]);
 
   return (
-    <div className="fixed inset-0 bg-[radial-gradient(90%_70%_at_50%_35%,#16171b_0%,#060607_70%)]">
+    <div className="fixed inset-0 bg-[radial-gradient(90%_70%_at_50%_35%,#2a241f_0%,#0b0a09_75%)]">
       <AvatarCanvas frameloop="demand">
         <FixedCamera view={view} />
         <Invalidator />
@@ -218,10 +220,16 @@ function SynthShots() {
   useEffect(() => {
     (async () => {
       const t = await loadTemplateHead();
+      if (new URLSearchParams(window.location.search).has("video")) {
+        const v = syntheticScanVideo(t);
+        (window as unknown as { __VIDEO__: typeof v }).__VIDEO__ = v;
+        setN(v.frames.length);
+        return;
+      }
       const { frames } = await syntheticCapture(t);
       (window as unknown as { __SHOTS__: string[] }).__SHOTS__ = frames.map((f) => f.image.toDataURL("image/jpeg", 0.92));
       setN(frames.length);
     })().catch((e) => (window.__ERR__ = String(e)));
   }, []);
-  return <pre className="p-6 text-mist-200">{n ? `${n} synthetic selfies ready` : "rendering…"}</pre>;
+  return <pre className="p-6 text-mist-200">{n ? `${n} synthetic frames ready` : "rendering…"}</pre>;
 }

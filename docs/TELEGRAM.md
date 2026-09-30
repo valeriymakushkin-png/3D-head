@@ -2,6 +2,21 @@
 
 Entry: `https://<host>/tg` (`app/tg/page.tsx` → `components/telegram/TgApp.tsx`).
 
+## Setup (5 minutes)
+1. **Create the bot**: in Telegram open [@BotFather](https://t.me/BotFather) → `/newbot` → pick a name and a
+   username ending in `bot`. Copy the token.
+2. **Attach the Mini App**: `/mybots` → your bot → **Bot Settings → Configure Mini App → Enable Mini App** →
+   send `https://<host>/tg`. This adds an **Open** button to the bot's profile and makes
+   `https://t.me/<bot>?startapp` open the app directly.
+3. **Menu button** (optional, the button next to the message field): **Bot Settings → Menu Button** →
+   URL `https://<host>/tg`, title `Open TwinMe`.
+4. **Vercel → Settings → Environment Variables**: `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` (without `@`) and
+   `TELEGRAM_BOT_TOKEN`, then **Redeploy** (`NEXT_PUBLIC_*` values are baked in at build time).
+5. **Login Widget on the website** (optional): BotFather → `/setdomain` → your bot → `<host>`.
+
+The Mini App works before step 4 too (as an on-device demo); the token adds verified sign-in, and
+Supabase adds synced accounts and Stars payments. The bot `/start` reply needs the webhook below.
+
 ## Native integration
 | Concern | Implementation |
 |---|---|

@@ -3,26 +3,55 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { toFrame, snapshot } from "@/lib/recon/capture";
-import { getFaceLandmarker, poseFromMatrix } from "@/lib/recon/mediapipe";
+import type { FaceLandmarker, FaceLandmarkerResult } from "@mediapipe/tasks-vision";
+import { fallBackToCpu, getFaceLandmarker, poseFromMatrix, preloadFaceTracking } from "@/lib/recon/mediapipe";
 import { POSE_TARGETS, REQUIRED_BINS, binForPose, mergeFrame, measureFrame } from "@/lib/recon/poses";
 import type { CaptureFrame, PoseBinId } from "@/lib/recon/types";
 import { haptic } from "@/lib/telegram/webapp";
 import { cn } from "@/lib/cn";
 import { Button, easeOut } from "@/components/ui/primitives";
 
-type Hint = "center" | "closer" | "back" | "light" | "still" | null;
+type Hint = "center" | "noface" | "closer" | "back" | "light" | "still" | null;
+type Phase = "camera" | "tap" | "loading" | "tracking" | "error";
+
+/** Frames fed to the landmarker are downscaled (landmarks are normalised, so capture stays full-res). */
+const FEED_WIDTH = 480;
+
+function cameraError(e: unknown): string {
+  const name = e instanceof DOMException ? e.name : "";
+  if (name === "NotAllowedError" || name === "SecurityError") return "Camera access is blocked. Allow it for this site in your browser settings, or upload photos instead.";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "No front camera found. You can upload photos instead.";
+  if (name === "NotReadableError" || name === "AbortError") return "The camera is busy in another app. Close it and try again, or upload photos.";
+  return "This browser can't open the camera here. Try Safari or Chrome, or upload photos instead.";
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e) => (clearTimeout(t), reject(e)),
+    );
+  });
+}
 
 /**
  * Face-ID-style guided capture. The landmarker runs on every video frame;
  * a frame is kept automatically when the head pose falls in an unfilled bin,
  * the head is still, the face is sharp, well lit and large enough.
+ *
+ * Every stage reports its state (camera → loading → tracking), failures are
+ * never silent, and the tracker falls back to the CPU delegate when the GPU
+ * path misbehaves (common in mobile WebKit).
  */
 export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureFrame[]) => void; onCancel: () => void; hd: boolean }) {
   const video = useRef<HTMLVideoElement>(null);
   const bins = useRef(new Map<PoseBinId, CaptureFrame>());
+  const tapToStart = useRef<(() => void) | null>(null);
   const [filled, setFilled] = useState<PoseBinId[]>([]);
   const [pose, setPose] = useState({ yaw: 0, pitch: 0, found: false });
   const [hint, setHint] = useState<Hint>("center");
+  const [phase, setPhase] = useState<Phase>("camera");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState(0);
   const required = hd ? POSE_TARGETS.map((p) => p.id) : REQUIRED_BINS;
@@ -35,35 +64,115 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
     let last = { yaw: 0, pitch: 0, t: 0 };
     let frameNo = 0;
     let lastQuality = { brightness: 128, faceScale: 0.4, sharpness: 100 };
+    const fail = (message: string) => {
+      if (stopped) return;
+      setError(message);
+      setPhase("error");
+      haptic("error");
+    };
 
     (async () => {
+      // Start the ~12 MB runtime download while the permission prompt is up.
+      preloadFaceTracking();
       try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } },
           audio: false,
         });
-      } catch {
-        setError("Camera access was blocked. You can upload photos instead.");
-        return;
+      } catch (e) {
+        return fail(cameraError(e));
       }
+      if (stopped) return stream.getTracks().forEach((t) => t.stop());
       const v = video.current!;
+      v.muted = true;
+      v.setAttribute("muted", "");
+      v.setAttribute("playsinline", "");
       v.srcObject = stream;
-      await v.play();
-      const detector = await getFaceLandmarker("VIDEO");
-      const work = document.createElement("canvas");
+      try {
+        await v.play();
+      } catch {
+        if (stopped) return;
+        // Some WebViews only start video from a direct tap.
+        setPhase("tap");
+        await new Promise<void>((resolve) => (tapToStart.current = resolve));
+        try {
+          await v.play();
+        } catch (e) {
+          return fail(cameraError(e));
+        }
+      }
+      if (stopped) return;
+
+      setPhase("loading");
+      let detector: FaceLandmarker;
+      try {
+        detector = await withTimeout(getFaceLandmarker("VIDEO"), 60_000);
+      } catch (e) {
+        console.error("[scan] face tracking failed to load", e);
+        return fail("Face tracking couldn't load. Check your connection and try again, or upload photos instead.");
+      }
+      if (stopped) return;
+      setPhase("tracking");
+
+      const feed = document.createElement("canvas");
+      const feedCtx = feed.getContext("2d", { willReadFrequently: true })!;
+      let ts = 0;
+      let errors = 0;
+      let swapping = false;
+      let lastFace = performance.now();
+      // Hints only change once they've held for a moment, so the headline never flickers.
+      let pendingHint: Hint = "center";
+      let pendingSince = 0;
+      let shownHint: Hint = "center";
+      const showHint = (h: Hint, now: number) => {
+        if (h !== pendingHint) {
+          pendingHint = h;
+          pendingSince = now;
+        }
+        if (h !== shownHint && now - pendingSince > 350) {
+          shownHint = h;
+          setHint(h);
+        }
+      };
+      const switchToCpu = () => {
+        if (swapping || !fallBackToCpu()) return false;
+        swapping = true;
+        getFaceLandmarker("VIDEO")
+          .then((d) => (detector = d))
+          .catch(() => fail("Face tracking isn't supported on this device. You can upload photos instead."))
+          .finally(() => (swapping = false));
+        return true;
+      };
 
       const loop = () => {
         if (stopped) return;
         raf = requestAnimationFrame(loop);
-        if (v.readyState < 2) return;
+        if (swapping || v.readyState < 2 || !v.videoWidth) return;
         const now = performance.now();
-        const res = detector.detectForVideo(v, now);
-        frameNo++;
-        if (!res.faceLandmarks.length || !res.facialTransformationMatrixes?.length) {
-          setPose((p) => ({ ...p, found: false }));
-          setHint("center");
+        feed.width = FEED_WIDTH;
+        feed.height = Math.round((FEED_WIDTH * v.videoHeight) / v.videoWidth);
+        feedCtx.drawImage(v, 0, 0, feed.width, feed.height);
+        let res: FaceLandmarkerResult;
+        try {
+          ts = Math.max(ts + 1, Math.round(now));
+          res = detector.detectForVideo(feed, ts);
+          errors = 0;
+        } catch (e) {
+          console.warn("[scan] tracking error", e);
+          if (++errors >= 5 && !switchToCpu()) fail("Face tracking stopped working on this device. You can upload photos instead.");
           return;
         }
+        frameNo++;
+        if (!res.faceLandmarks.length || !res.facialTransformationMatrixes?.length) {
+          const lost = now - lastFace;
+          // A GPU delegate that initialises but never finds a face: retry once on CPU.
+          if (lost > 6000 && switchToCpu()) lastFace = now;
+          setPose((p) => (p.found ? { ...p, found: false } : p));
+          showHint(lost > 3000 ? "noface" : "center", now);
+          return;
+        }
+        lastFace = now;
         const p = poseFromMatrix(res.facialTransformationMatrixes[0].data);
         const dt = Math.max(1, now - last.t) / 1000;
         const speed = Math.hypot(p.yaw - last.yaw, p.pitch - last.pitch) / dt;
@@ -71,15 +180,12 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
         setPose({ yaw: p.yaw, pitch: p.pitch, found: true });
 
         if (frameNo % 5 === 0) {
-          work.width = 320;
-          work.height = Math.round((320 * v.videoHeight) / v.videoWidth);
-          work.getContext("2d")!.drawImage(v, 0, 0, work.width, work.height);
           const lm = res.faceLandmarks[0].flatMap((l) => [l.x, l.y, l.z]);
-          lastQuality = measureFrame(work, work.width, work.height, lm);
+          lastQuality = measureFrame(feed, feed.width, feed.height, lm);
         }
         const hintNow: Hint =
           lastQuality.faceScale < 0.28 ? "closer" : lastQuality.faceScale > 0.8 ? "back" : lastQuality.brightness < 58 ? "light" : speed > 40 ? "still" : null;
-        setHint(hintNow);
+        showHint(hintNow, now);
 
         const bin = binForPose(p.yaw, p.pitch);
         if (!bin || !required.includes(bin.id) || hintNow || speed > 30) return;
@@ -96,11 +202,15 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
         }
       };
       loop();
-    })();
+    })().catch((e) => {
+      console.error("[scan]", e);
+      fail("Something went wrong starting the scan. You can upload photos instead.");
+    });
 
     return () => {
       stopped = true;
       cancelAnimationFrame(raf);
+      tapToStart.current?.();
       stream?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,11 +228,29 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
   const canFinishEarly = ["front", "left30", "right30"].every((b) => filled.includes(b as PoseBinId)) && filled.length >= 4;
   const hintText: Record<Exclude<Hint, null>, string> = {
     center: "Center your face in the oval",
+    noface: "Can't see your face yet — hold the phone at eye level",
     closer: "Move a little closer",
     back: "Move back slightly",
     light: "Find softer, brighter light",
     still: "Hold still for a moment",
   };
+
+  const message =
+    error ??
+    (phase === "camera"
+      ? "Starting the camera…"
+      : phase === "tap"
+        ? "Tap to start the camera"
+        : phase === "loading"
+          ? "Getting face tracking ready…"
+          : hint
+            ? hintText[hint]
+            : next
+              ? next.instruction
+              : "Perfect. Building your twin…");
+  const messageKey = error ? "error" : phase === "tracking" ? (hint ?? next?.id ?? "done") : phase;
+  const detail =
+    phase === "camera" ? "Allow camera access when your phone asks" : phase === "loading" ? "The first time takes a few seconds" : phase === "tracking" && hint === "noface" ? "Good, even light on your face helps" : null;
 
   return (
     <div className="fixed inset-0 bg-black">
@@ -152,6 +280,7 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
           strokeLinecap="round"
           pathLength={1}
           strokeDasharray="1 1"
+          initial={{ strokeDashoffset: 1 }}
           animate={{ strokeDashoffset: 1 - progress }}
           transition={{ duration: 0.6, ease: easeOut }}
           style={{ rotate: -90, transformOrigin: "50px 46px" }}
@@ -167,19 +296,26 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
         </span>
       </div>
 
-      <div className="absolute inset-x-0 top-[9%] text-center">
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={error ?? (hint ? hint : next?.id ?? "done")}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="font-display text-[22px] font-semibold tracking-[-0.02em] text-mist-50"
-          >
-            {error ?? (hint ? hintText[hint] : next ? next.instruction : "Perfect. Building your twin…")}
-          </motion.p>
-        </AnimatePresence>
+      <div className="absolute inset-x-0 top-[9%] px-6 text-center">
+        {/* No exit animation: the headline must always show the current instruction. */}
+        <motion.div key={messageKey} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+          <p className="font-display text-[22px] font-semibold leading-tight text-mist-50">{message}</p>
+          {detail && <p className="mt-2 text-[14px] text-mist-300">{detail}</p>}
+        </motion.div>
       </div>
+
+      {(phase === "camera" || phase === "loading") && (
+        <div className="absolute inset-0 grid place-items-center" aria-live="polite">
+          <span className="size-9 animate-spin rounded-full border-2 border-white/15 border-t-white/80" />
+        </div>
+      )}
+      {phase === "tap" && (
+        <div className="absolute inset-0 grid place-items-center">
+          <Button variant="solid" onClick={() => tapToStart.current?.()}>
+            Start camera
+          </Button>
+        </div>
+      )}
 
       {/* pose map: where your nose points vs. the targets (mirrored like the preview) */}
       <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-4 pb-[calc(var(--tg-safe-bottom)+28px)]">

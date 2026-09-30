@@ -125,7 +125,7 @@ export function StylistPanel() {
           <div ref={scroller} className="no-scrollbar flex-1 space-y-5 overflow-y-auto px-5 pb-4">
             {messages.length === 0 && a && (
               <div className="pt-2">
-                <p className="font-serif text-[26px] italic leading-8 text-mist-50">Tell me the look you&apos;re after.</p>
+                <p className="font-display text-[24px] font-semibold leading-8 text-mist-50">Tell me the look you&apos;re after.</p>
                 <p className="mt-2 text-[13px] leading-5 text-mist-400">I can see your twin in 3D and change it as we talk.</p>
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {[`${cap(a.faceShape)} face`, `${cap(a.skin.undertone)} undertone`, `${cap(a.hair.lengthClass)} hair`, `IPD ${a.metrics.ipdMm.toFixed(0)} mm`].map((c) => (
