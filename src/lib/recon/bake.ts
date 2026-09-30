@@ -7,6 +7,7 @@ import {
   DataTexture,
   HalfFloatType,
   LinearFilter,
+  LinearMipmapLinearFilter,
   Matrix3,
   Matrix4,
   Mesh,
@@ -55,6 +56,8 @@ export interface BakeView {
   skinMask: Uint8Array;
   gain: [number, number, number];
   weight: number;
+  /** Weight multiplier inside the eye/mouth mask (1 for the front photo, ~0 for others). */
+  featureKeep: number;
 }
 
 const common = /* glsl */ `
@@ -87,12 +90,15 @@ const depthFS = /* glsl */ `
 const accumVS = /* glsl */ `
   ${common}
   uniform mat3 uNrm;
+  attribute float aFeat;
   varying vec3 vImg;
   varying vec3 vN;
   varying float vZ;
+  varying float vFeat;
   void main() {
     vec3 q = toImage(position);
     vImg = q;
+    vFeat = aFeat;
     vN = uNrm * normal;
     vZ = zNorm(q.z);
     gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
@@ -105,9 +111,11 @@ const accumFS = /* glsl */ `
   uniform vec2 uImg;
   uniform vec3 uGain;
   uniform float uWeight;
+  uniform float uFeatureKeep;
   varying vec3 vImg;
   varying vec3 vN;
   varying float vZ;
+  varying float vFeat;
   void main() {
     vec2 t = vec2(vImg.x / uImg.x, -vImg.y / uImg.y);
     if (t.x < 0.0 || t.y < 0.0 || t.x > 1.0 || t.y > 1.0) discard;
@@ -117,7 +125,9 @@ const accumFS = /* glsl */ `
     float facing = clamp(n.z, 0.0, 1.0);
     float seg = texture2D(uSeg, t).r;
     float edge = smoothstep(0.0, 0.04, min(min(t.x, 1.0 - t.x), min(t.y, 1.0 - t.y)));
-    float w = vis * facing * facing * facing * seg * edge * uWeight;
+    // Eyes and mouth come from one photo only: blending blinks and smiles ghosts.
+    float feat = mix(1.0, uFeatureKeep, vFeat);
+    float w = vis * facing * facing * facing * facing * seg * edge * uWeight * feat;
     vec3 c = texture2D(uPhoto, t).rgb * uGain;
     gl_FragColor = vec4(c * w, w);
   }
@@ -131,12 +141,26 @@ const resolveFS = /* glsl */ `
   vec3 toSRGB(vec3 c) {
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
   }
+  float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
   void main() {
-    vec4 a = texture2D(uAcc, vUv);
-    vec3 fb = texture2D(uTemplate, vUv).rgb * uSkinRatio;
+    vec4 a = textureLod(uAcc, vUv, 0.0);
     vec3 proj = a.rgb / max(a.a, 1e-4);
-    float k = smoothstep(0.02, 0.35, a.a);
-    gl_FragColor = vec4(toSRGB(clamp(mix(fb, proj, k), 0.0, 1.0)), 1.0);
+    float k = smoothstep(0.03, 0.4, a.a);
+    // Unseen skin (under a fringe, under the chin, the back of the head):
+    // pull-push inpainting through the accumulator's mip chain, so the fill
+    // continues the neighbouring *photographed* skin, lighting included…
+    vec3 fill = texture2D(uTemplate, vUv).rgb * uSkinRatio;
+    bool have = false;
+    for (int l = 11; l >= 1; l--) {
+      vec4 m = textureLod(uAcc, vUv, float(l));
+      if (m.a < 1e-6) continue;
+      vec3 c = m.rgb / m.a;
+      fill = have ? mix(fill, c, smoothstep(0.01, 0.25, m.a)) : c;
+      have = true;
+    }
+    // …re-textured with the template's pores and stubble (luminance detail only).
+    float det = clamp(lum(texture2D(uTemplate, vUv).rgb) / max(lum(textureLod(uTemplate, vUv, 4.0).rgb), 1e-3), 0.72, 1.3);
+    gl_FragColor = vec4(toSRGB(clamp(mix(fill * det, proj, k), 0.0, 1.0)), 1.0);
   }
 `;
 
@@ -162,7 +186,14 @@ export function bakeTexture(
   renderer.setSize(8, 8, false);
   renderer.autoClear = false;
 
-  const acc = new WebGLRenderTarget(size, size, { type: HalfFloatType, format: RGBAFormat, depthBuffer: false });
+  const acc = new WebGLRenderTarget(size, size, {
+    type: HalfFloatType,
+    format: RGBAFormat,
+    depthBuffer: false,
+    generateMipmaps: true, // the resolve pass inpaints through the mip chain
+    minFilter: LinearMipmapLinearFilter,
+    magFilter: LinearFilter,
+  });
   renderer.setRenderTarget(acc);
   renderer.setClearColor(0x000000, 0);
   renderer.clear(true, false, false);
@@ -188,6 +219,7 @@ export function bakeTexture(
     uDepth: { value: null as Texture | null },
     uGain: { value: new Vector3(1, 1, 1) },
     uWeight: { value: 1 },
+    uFeatureKeep: { value: 1 },
   };
   const depthMat = new ShaderMaterial({
     vertexShader: depthVS,
@@ -251,6 +283,7 @@ export function bakeTexture(
     U.uDepth.value = depth.texture;
     U.uGain.value.set(...v.gain);
     U.uWeight.value = v.weight;
+    U.uFeatureKeep.value = v.featureKeep;
     mesh.material = accumMat;
     renderer.setRenderTarget(acc);
     renderer.render(scene, cam);

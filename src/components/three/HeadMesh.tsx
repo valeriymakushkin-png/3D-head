@@ -6,7 +6,8 @@ import type { Look } from "@/lib/avatar/look";
 import type { HeadAsset } from "@/lib/head/asset";
 import type { BeardParams, HairColorSpec, HairParams } from "@/lib/hair/params";
 import { writeMasks } from "@/lib/three/masks";
-import { createSkinMaterial, updateSkinUniforms } from "@/lib/three/skinMaterial";
+import { applyEyeCut, createSkinMaterial, updateSkinUniforms } from "@/lib/three/skinMaterial";
+import { eyeSetup } from "@/lib/three/eyes";
 
 export interface SkinShade {
   vis: Uint8Array;
@@ -76,6 +77,10 @@ export function HeadMesh({
   useEffect(() => {
     writeSkinShade(geometry, skinShade);
   }, [geometry, skinShade]);
+
+  useEffect(() => {
+    applyEyeCut(material, eyeSetup(asset.rig, asset.analysis.eyeColor));
+  }, [material, asset]);
 
   useEffect(() => {
     updateSkinUniforms(material, look, asset.bakedBeard, hair, beard, hairColor);

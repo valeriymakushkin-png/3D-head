@@ -35,6 +35,29 @@ function distToPoly(x: number, y: number, pts: Poly) {
   return inside(x, y, pts) ? 0 : d;
 }
 
+/**
+ * Eyes (with lids and lashes) and mouth, for the texture bake: these change
+ * between photos (blinks, smiles), so they are taken from the front photo only.
+ */
+export function expressionMask(positions: ArrayLike<number>, landmarks: ArrayLike<number>): Float32Array {
+  const n = positions.length / 3;
+  const out = new Float32Array(n);
+  const rig = { landmarks } as Pick<HeadRig, "landmarks">;
+  const eyes = [poly(rig as HeadRig, EYE_R), poly(rig as HeadRig, EYE_L)];
+  const lips = poly(rig as HeadRig, LIPS_OUTER);
+  const frontZ = lmk(rig, LM.cheekR)[2] - 0.01;
+  for (let i = 0; i < n; i++) {
+    const x = positions[i * 3],
+      y = positions[i * 3 + 1],
+      z = positions[i * 3 + 2];
+    if (z < frontZ) continue;
+    const de = Math.min(distToPoly(x, y, eyes[0]), distToPoly(x, y, eyes[1]));
+    const dm = distToPoly(x, y, lips);
+    out[i] = Math.max(1 - smoothstep(0.004, 0.011, de), 1 - smoothstep(0.003, 0.01, dm));
+  }
+  return out;
+}
+
 export interface StaticMasks {
   beardZone: Float32Array;
   features: Float32Array;

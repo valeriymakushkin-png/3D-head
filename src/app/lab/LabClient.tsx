@@ -24,6 +24,7 @@ import { writeMasks } from "@/lib/three/masks";
 import { useSceneVersion } from "@/lib/engine/sceneBus";
 import { type HeadAsset, TEMPLATE, loadInstantHead, loadTemplateGeometry, loadTemplateHead, loadTexture } from "@/lib/head/asset";
 import { reconstructInstantTwin } from "@/lib/recon/reconstruct";
+import { framesFromPhotos } from "@/lib/recon/capture";
 import { syntheticCapture, syntheticScanVideo } from "./synthetic";
 import { buildRig } from "@/lib/head/rig";
 import { autoRigMesh } from "@/lib/recon/autorig";
@@ -139,7 +140,20 @@ function LabScene({ recon = false }: { recon?: boolean }) {
       const template = await loadTemplateHead();
       if (!recon) return setAsset(template);
       const t0 = performance.now();
-      const { frames, log } = await syntheticCapture(template);
+      // /lab?mode=recon&src=photos: real photos injected by a test harness as
+      // window.__PHOTOS__ (data URLs), through the same import path as uploads.
+      const { frames, log } =
+        q.get("src") === "photos"
+          ? await (async () => {
+              const w = window as unknown as { __PHOTOS__?: string[] };
+              while (!w.__PHOTOS__) await new Promise((r) => setTimeout(r, 100));
+              const files = await Promise.all(
+                w.__PHOTOS__.map(async (u, i) => new File([await (await fetch(u)).blob()], `photo${i}.jpg`, { type: "image/jpeg" })),
+              );
+              const r = await framesFromPhotos(files);
+              return { frames: r.frames, log: [`${r.frames.length} photos, rejected: ${r.rejected.join(", ") || "none"}`, ...r.frames.map((f) => `yaw ${f.pose.yaw.toFixed(1)} pitch ${f.pose.pitch.toFixed(1)}`)] };
+            })()
+          : await syntheticCapture(template);
       setShots(frames.map((f) => f.image.toDataURL("image/jpeg", 0.7)));
       const record = await reconstructInstantTwin(frames, (p) => setReconLog((l) => [...l.slice(-3), `${(p.progress * 100).toFixed(0)}% ${p.message}`]), {
         persist: false,
@@ -158,6 +172,7 @@ function LabScene({ recon = false }: { recon?: boolean }) {
       console.error(e);
       setReconLog((l) => [...l, `ERROR ${e}`]);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recon]);
   useEffect(() => {
     if (asset && !busy) {
@@ -187,7 +202,7 @@ function LabScene({ recon = false }: { recon?: boolean }) {
           </>
         )}
       </AvatarCanvas>
-      {recon && (
+      {recon && !q.get("clean") && (
         <div className="absolute left-3 top-3 flex max-w-[48%] flex-col gap-2 text-[11px] leading-4 text-mist-300">
           <div className="flex flex-wrap gap-1">
             {shots.map((u, i) => (

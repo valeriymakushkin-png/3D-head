@@ -43,6 +43,10 @@ export interface SkinUniforms {
   uSkinColor: { value: Color };
   uScalpCover: { value: number };
   uHairColor: { value: Color };
+  uEyeOpen: { value: number };
+  uEyeR: { value: Vector2[] };
+  uEyeL: { value: Vector2[] };
+  uEyeZ: { value: number };
 }
 
 export type SkinMaterial = MeshPhysicalMaterial & { userData: { uniforms: SkinUniforms } };
@@ -72,6 +76,10 @@ export function createSkinMaterial(map: Texture, normalMap: Texture | null, skin
     uSkinColor: { value: skinColor.clone() },
     uScalpCover: { value: 0 },
     uHairColor: { value: new Color("#1c110a") },
+    uEyeOpen: { value: 0 },
+    uEyeR: { value: Array.from({ length: 16 }, () => new Vector2()) },
+    uEyeL: { value: Array.from({ length: 16 }, () => new Vector2()) },
+    uEyeZ: { value: 1 },
   };
   mat.userData.uniforms = uniforms;
 
@@ -80,11 +88,17 @@ export function createSkinMaterial(map: Texture, normalMap: Texture | null, skin
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
-        "#include <common>\nattribute vec4 aMask;\nattribute vec4 aLightVis;\nattribute float aSkinAO;\nvarying vec4 vMask;\nvarying vec4 vLightVis;\nvarying float vSkinAO;",
+        "#include <common>\nattribute vec4 aMask;\nattribute vec4 aLightVis;\nattribute float aSkinAO;\nvarying vec4 vMask;\nvarying vec4 vLightVis;\nvarying float vSkinAO;\nvarying vec3 vHeadPos;",
       )
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMask = aMask;\nvLightVis = aLightVis;\nvSkinAO = aSkinAO;");
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMask = aMask;\nvLightVis = aLightVis;\nvSkinAO = aSkinAO;\nvHeadPos = position;");
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <lights_physical_pars_fragment>", SKIN_DIRECT)
+      // Open the eyes: cut the palpebral fissure along the user's own lid contour.
+      .replace(
+        "#include <clipping_planes_fragment>",
+        `#include <clipping_planes_fragment>
+        if ( uEyeOpen > 0.5 && vHeadPos.z > uEyeZ && ( inEye( vHeadPos.xy, uEyeR ) || inEye( vHeadPos.xy, uEyeL ) ) ) discard;`,
+      )
       // Baked visibility of each studio light: groom shadows + the head's own soft shadows.
       .replace("#include <lights_fragment_begin>", SKIN_LIGHTS_BEGIN)
       .replace(
@@ -98,6 +112,19 @@ export function createSkinMaterial(map: Texture, normalMap: Texture | null, skin
         `#include <common>
         varying vec4 vLightVis;
         varying float vSkinAO;
+        varying vec3 vHeadPos;
+        uniform float uEyeOpen;
+        uniform vec2 uEyeR[16];
+        uniform vec2 uEyeL[16];
+        uniform float uEyeZ;
+        bool inEye( vec2 p, vec2 poly[16] ) {
+          bool c = false;
+          for ( int i = 0, j = 15; i < 16; j = i++ ) {
+            vec2 a = poly[i], b = poly[j];
+            if ( ( a.y > p.y ) != ( b.y > p.y ) && p.x < ( b.x - a.x ) * ( p.y - a.y ) / ( b.y - a.y + 1e-9 ) + a.x ) c = !c;
+          }
+          return c;
+        }
         float lightVis( const in int i ) {
           float v = i == 0 ? vLightVis.x : i == 1 ? vLightVis.y : i == 2 ? vLightVis.z : i == 3 ? vLightVis.w : 1.0;
           return 0.06 + 0.94 * v;
@@ -149,7 +176,7 @@ export function createSkinMaterial(map: Texture, normalMap: Texture | null, skin
         roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.92, uComplexion * (1.0 - vMask.w));`,
       );
   };
-  mat.customProgramCacheKey = () => "twinme-skin-v2";
+  mat.customProgramCacheKey = () => "twinme-skin-v3";
   return mat;
 }
 
@@ -173,4 +200,13 @@ export function updateSkinUniforms(
   u.uBeardColor.value.setRGB(0.35 + root.r * 0.9, 0.3 + root.g * 0.9, 0.28 + root.b * 0.9);
   u.uHairColor.value.set(hairColor.root);
   u.uScalpCover.value = hair ? 0.72 : 0;
+}
+
+/** Cuts the eye openings for a twin captured with open eyes (see lib/three/eyes.ts). */
+export function applyEyeCut(mat: SkinMaterial, eyes: import("@/lib/three/eyes").EyeSetup) {
+  const u = mat.userData.uniforms;
+  u.uEyeOpen.value = eyes.open ? 1 : 0;
+  u.uEyeZ.value = eyes.cutZ;
+  eyes.contours[0].forEach((p, i) => u.uEyeR.value[i].copy(p));
+  eyes.contours[1].forEach((p, i) => u.uEyeL.value[i].copy(p));
 }

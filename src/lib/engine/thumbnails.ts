@@ -22,7 +22,8 @@ import { buildGlasses, disposeGroup } from "@/lib/three/glasses";
 import { createHairMaterial, setHairColor } from "@/lib/three/hairMaterial";
 import { AMBIENT, STUDIO_LIGHTS } from "@/lib/three/lighting";
 import { writeMasks } from "@/lib/three/masks";
-import { createSkinMaterial, updateSkinUniforms, type SkinMaterial } from "@/lib/three/skinMaterial";
+import { applyEyeCut, createSkinMaterial, updateSkinUniforms, type SkinMaterial } from "@/lib/three/skinMaterial";
+import { buildEyes, eyeSetup } from "@/lib/three/eyes";
 import { strandGeometry } from "@/components/three/StrandMesh";
 import { writeSkinShade } from "@/components/three/HeadMesh";
 
@@ -67,6 +68,7 @@ export class ThumbnailFactory {
   private hairMat: ShaderMaterial;
   private beardMat: ShaderMaterial;
   private extras = new Group();
+  private eyes: Group;
   private seq = 0;
 
   constructor(private asset: HeadAsset) {
@@ -84,7 +86,10 @@ export class ThumbnailFactory {
     this.hair = new Mesh(undefined, this.hairMat);
     this.beard = new Mesh(undefined, this.beardMat);
     this.hair.frustumCulled = this.beard.frustumCulled = false;
-    this.scene.add(this.head, this.hair, this.beard, this.extras);
+    const eyes = eyeSetup(asset.rig, asset.analysis.eyeColor);
+    applyEyeCut(this.skin, eyes);
+    this.eyes = buildEyes(eyes);
+    this.scene.add(this.head, this.hair, this.beard, this.extras, this.eyes);
     // three-quarter portrait, chin to crown
     this.camera.position.set(0.42, 0.05, 0.63);
     this.camera.lookAt(0, -0.005, 0);
@@ -139,5 +144,6 @@ export class ThumbnailFactory {
     this.hairMat.dispose();
     this.beardMat.dispose();
     this.extras.children.forEach((c) => disposeGroup(c as Group));
+    disposeGroup(this.eyes);
   }
 }

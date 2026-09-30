@@ -4,13 +4,14 @@ import type { BufferGeometry } from "three";
 import { Float32BufferAttribute } from "three";
 import { type HeadAsset, buildAnalysis, loadTemplateHead } from "@/lib/head/asset";
 import { buildRig } from "@/lib/head/rig";
-import { type SegmentedFrame, estimateHairAndBeard, linearOf, meanSkinRgb, segmentFrame } from "@/lib/recon/analyze";
+import { type SegmentedFrame, estimateHairAndBeard, linearOf, meanSkinRgb, sampleIrisColor, segmentFrame } from "@/lib/recon/analyze";
 import { bakeTexture, type BakeView } from "@/lib/recon/bake";
 import { fuseLandmarks, toImageSpace } from "@/lib/recon/fusion";
 import { applyAffine, fitAffine, fitRbf } from "@/lib/recon/linalg";
 import { type InstantTwinRecord, avatarVault } from "@/lib/recon/storage";
 import type { CaptureFrame, ReconProgress } from "@/lib/recon/types";
 import { warpTemplate } from "@/lib/recon/warp";
+import { expressionMask } from "@/lib/three/masks";
 
 /**
  * Instant Twin — fully on-device reconstruction (~5–15 s on a phone):
@@ -63,6 +64,7 @@ export async function reconstructInstantTwin(
   const geometry: BufferGeometry = template.geometry.clone();
   geometry.setAttribute("position", new Float32BufferAttribute(warp.positions, 3));
   geometry.computeVertexNormals();
+  geometry.setAttribute("aFeat", new Float32BufferAttribute(expressionMask(warp.positions, F), 1));
 
   // 4) cameras + per-view landmark residual fields
   report("texture", 0.55, "Projecting your photos onto the surface");
@@ -127,7 +129,9 @@ export async function reconstructInstantTwin(
       residual,
       skinMask: segs[k].skinMask,
       gain,
-      weight: k === frontIdx ? 1.4 : Math.max(0.35, f.quality.score),
+      // The front photo owns the face; the others fill the sides and under the chin.
+      weight: k === frontIdx ? 2.5 : Math.max(0.35, f.quality.score),
+      featureKeep: k === frontIdx ? 1 : 0.02,
     };
   });
 
@@ -153,6 +157,7 @@ export async function reconstructInstantTwin(
   rig.meshToHead = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   const analysis = buildAnalysis(rig, frontSkin, hb.natural, hb.beard);
   analysis.hair.lengthClass = hb.lengthClass;
+  analysis.eyeColor = sampleIrisColor(frames[frontIdx]);
 
   report("finish", 0.95, "Finishing your twin");
   const albedo = await new Promise<Blob>((res, rej) => bake.canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", 0.92));

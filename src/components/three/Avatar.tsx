@@ -17,6 +17,7 @@ import {
 import type { HeadAsset } from "@/lib/head/asset";
 import { buildAccessories } from "@/lib/three/accessories";
 import { buildGlasses, disposeGroup } from "@/lib/three/glasses";
+import { buildEyes, eyeSetup } from "@/lib/three/eyes";
 import { HeadMesh, type SkinShade } from "@/components/three/HeadMesh";
 import { Shirt } from "@/components/three/Shirt";
 import { StrandMesh } from "@/components/three/StrandMesh";
@@ -96,6 +97,9 @@ export function Avatar({ asset, look, quality, channel = "main", isolated = fals
     if (glasses) disposeGroup(glasses);
   }, [glasses]);
 
+  const eyes = useMemo(() => buildEyes(eyeSetup(asset.rig, asset.analysis.eyeColor)), [asset]);
+  useEffect(() => () => disposeGroup(eyes), [eyes]);
+
   const accessoriesKey = look.accessories.join(",");
   const accessories = useMemo(
     () => buildAccessories(look.accessories, asset.rig),
@@ -119,6 +123,7 @@ export function Avatar({ asset, look, quality, channel = "main", isolated = fals
         skinShade={skinShade}
         cloneGeometry={isolated}
       />
+      <primitive object={eyes} />
       <Shirt asset={asset} />
       <StrandMesh name="hair" data={hair} color={hairColor} center={asset.rig.center} />
       <StrandMesh name="beard" data={beardParams ? beard : null} color={hairColor} center={asset.rig.center} darken={0.85} />

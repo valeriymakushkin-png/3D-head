@@ -164,7 +164,8 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
     for (let x = cx - fw * 0.15; x <= cx + fw * 0.15; x += 3) if (isHair(x, y)) hits++;
     if (hits > 2) hairTop = y;
   }
-  const hairHeight = Math.max(0, (topY - hairTop) / fh);
+  // Segmentation noise (dark backgrounds, hats) can read as very tall hair; cap it.
+  const hairHeight = Math.min(0.3, Math.max(0, (topY - hairTop) / fh));
 
   // Scalp coverage just above the forehead; bald scalps segment as skin.
   let hairPx = 0,
@@ -242,17 +243,20 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
   } else if (fringe > 0.35) {
     base = hairHeight > 0.16 ? "curtains" : "french_crop";
   } else if (hairHeight > 0.2) {
-    base = "quiff";
+    // Tall hair on top reads as a longer textured cut; a quiff's lifted
+    // front wall looks styled, not like the person's own hair.
+    base = "textured_crop";
     lengthClass = "medium";
-    lengthScale = Math.min(1.5, hairHeight / 0.22);
+    lengthScale = Math.min(1.45, Math.max(1, hairHeight / 0.15));
   } else {
     lengthScale = Math.min(1.4, Math.max(0.7, hairHeight / 0.12));
   }
   const natural: NaturalHair = {
     base,
     lengthScale,
-    volume: Math.min(0.9, Math.max(0.08, hairHeight * 3)),
-    curl: 0.2,
+    // Real hair rarely stands more than a couple of centimetres off the scalp.
+    volume: Math.min(0.5, Math.max(0.12, 0.1 + hairHeight * 1.4)),
+    curl: 0.15,
     color,
     density: Math.min(1, Math.max(0.1, scalpCoverage * 1.1)),
   };
@@ -321,4 +325,47 @@ function labToHex(L: number, a: number, b: number) {
   const bl = 0.0557 * X - 0.204 * Y + 1.057 * Z;
   const enc = (c: number) => 255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(0, c), 1 / 2.4) - 0.055);
   return rgbToHex(enc(r), enc(g), enc(bl));
+}
+
+/**
+ * Iris colour from the front photo: pixels in the iris ring (outside the pupil,
+ * without catchlights or the lid shadow), median in each channel. Returns
+ * undefined when the eyes are closed or too small to read.
+ */
+export function sampleIrisColor(frame: { image: HTMLCanvasElement; width: number; height: number; landmarks: Float32Array }): string | undefined {
+  const L = frame.landmarks;
+  const ctx = frame.image.getContext("2d", { willReadFrequently: true });
+  if (!ctx || L.length < 478 * 3) return undefined;
+  const px = (i: number) => [L[i * 3] * frame.width, L[i * 3 + 1] * frame.height];
+  const rs: number[] = [],
+    gs: number[] = [],
+    bs: number[] = [];
+  for (const [c, ring] of [
+    [468, [469, 470, 471, 472]],
+    [473, [474, 475, 476, 477]],
+  ] as const) {
+    const [cx, cy] = px(c);
+    const r = ring.reduce((s, i) => s + Math.hypot(px(i)[0] - cx, px(i)[1] - cy), 0) / ring.length;
+    if (r < 3) continue;
+    const x0 = Math.max(0, Math.floor(cx - r)),
+      y0 = Math.max(0, Math.floor(cy - r));
+    const w = Math.min(frame.width - x0, Math.ceil(2 * r)),
+      h = Math.min(frame.height - y0, Math.ceil(2 * r));
+    if (w <= 0 || h <= 0) continue;
+    const d = ctx.getImageData(x0, y0, w, h).data;
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const dd = Math.hypot(x0 + x - cx, y0 + y - cy) / r;
+        if (dd < 0.4 || dd > 0.85 || y0 + y < cy - r * 0.45) continue; // pupil, limbus, upper-lid shadow
+        const o = (y * w + x) * 4;
+        const lum = 0.299 * d[o] + 0.587 * d[o + 1] + 0.114 * d[o + 2];
+        if (lum > 200 || lum < 12) continue; // catchlights, lashes
+        rs.push(d[o]);
+        gs.push(d[o + 1]);
+        bs.push(d[o + 2]);
+      }
+  }
+  if (rs.length < 20) return undefined;
+  const med = (a: number[]) => a.sort((p, q) => p - q)[a.length >> 1];
+  return `#${[med(rs), med(gs), med(bs)].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
 }

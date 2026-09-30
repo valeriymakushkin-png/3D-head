@@ -161,7 +161,7 @@ function growScalpStrand(
   const shortStand = 1 - smoothstep(0.004, 0.028, L);
   let lift = clamp(p.lift * (0.55 + 0.45 * zones.wTop), 0, 0.95);
   lift = clamp(
-    Math.max(lift, 0.62 * shortStand) + (rng() - 0.5) * 0.35 * smoothstep(0.03, 0.008, L) + (rng() - 0.5) * 0.3 * p.messiness * (variation - 0.6),
+    Math.max(lift, 0.62 * shortStand) + (rng() - 0.5) * 0.35 * smoothstep(0.03, 0.008, L) + (rng() - 0.5) * 0.16 * p.messiness * (variation - 0.6),
     0,
     0.95,
   );
@@ -397,7 +397,7 @@ export function generateHair(
     growScalpStrand(ctx, p, points, s * K * 3, root, n, selAz[s], selH[s], selL[s], layer, rng, variation);
   };
   for (let s = 0; s < S; s += GUIDE_EVERY) {
-    grow(s, 1.9);
+    grow(s, 1.5);
     const g = s / GUIDE_EVERY;
     guideRoots[g * 3] = points[s * K * 3];
     guideRoots[g * 3 + 1] = points[s * K * 3 + 1];
@@ -408,7 +408,7 @@ export function generateHair(
   // 3) Children, clumped towards their nearest guide.
   for (let s = 0; s < S; s++) {
     if (s % GUIDE_EVERY === 0) continue;
-    grow(s, 0.7);
+    grow(s, 0.75);
     if (p.clump <= 0.01) continue;
     const o = s * K * 3;
     const g = grid.nearest(points[o], points[o + 1], points[o + 2]);

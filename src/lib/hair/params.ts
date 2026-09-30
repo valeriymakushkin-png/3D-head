@@ -347,6 +347,10 @@ export function resolveHairParams(look: Look["hair"], natural: NaturalHair): Hai
     p.volume = natural.volume;
     p.curl = natural.curl;
     p.density = natural.density;
+    // "Your hair" should look like combed, everyday hair, not a styled texture cut.
+    p.messiness = Math.min(p.messiness, 0.3);
+    p.lift = Math.min(p.lift, 0.35);
+    p.clump = Math.min(p.clump, 0.45);
   }
   if (look.volume !== null) p.volume = look.volume;
   if (look.texture !== null) {

@@ -39,6 +39,8 @@ export const FaceAnalysisSchema = z.object({
     detected: z.enum(["clean", "stubble", "short", "full", "goatee"]),
     coverage: z.number(),
   }),
+  /** Iris colour sampled from the front photo (absent for the closed-eyed template). */
+  eyeColor: z.string().optional(),
 });
 export type FaceAnalysis = z.infer<typeof FaceAnalysisSchema>;
 

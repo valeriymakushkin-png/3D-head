@@ -88,6 +88,16 @@ fidelity for users who've already converted.
   thin clearcoat adds the second specular lobe of skin oil. A dark crew-neck
   (`Shirt.tsx`) is the body mesh pushed out along its normals and cut by a
   collar plane in the shader.
+* **Eyes.** The template scan has closed lids, so for a twin captured with
+  open eyes the skin shader cuts the palpebral fissure along the user's own
+  lid contour and eyeballs sit behind it (`lib/three/eyes.ts`): sclera, the
+  iris in the colour sampled from the front photo, pupil, a glossy cornea for
+  catchlights and a dark socket so the canthi never show a hole.
+* **Texture bake** (`lib/recon/bake.ts`): the front photo owns the face and
+  alone supplies the eyes and mouth (blinks and smiles never blend); skin no
+  photo saw (under a fringe, the neck, the back of the head) is inpainted
+  through the accumulator's mip chain from the neighbouring photographed
+  skin, then given the template's pore detail as a luminance ratio.
 * **Landing hero** is not real-time: a Blender Cycles path-traced loop of the
   template twin with the engine's own groom (`scripts/cycles`), so the first
   impression costs the phone a short video instead of a WebGL scene.
