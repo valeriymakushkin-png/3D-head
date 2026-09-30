@@ -492,6 +492,7 @@ def main():
     ap.add_argument("--no-brows", action="store_true")
     ap.add_argument("--rim", type=float, default=0.6, help="rim light multiplier")
     ap.add_argument("--hide", default="", help="comma list of objects to hide (debug)")
+    ap.add_argument("--range", default="", help="video: render frames lo:hi only (1-based, inclusive)")
     a = ap.parse_args(argv)
 
     with open(a.export) as f:
@@ -549,6 +550,12 @@ def main():
         yaw = -a.yaw + 2 * a.yaw * s
         pivot.rotation_euler = Euler((math.radians(-a.pitch), 0.0, math.radians(-yaw)), "XYZ")
         pivot.keyframe_insert("rotation_euler", frame=i + 1)
+    # Resumable: frames already on disk are skipped; --range renders a slice.
+    sc.render.use_overwrite = False
+    sc.render.use_placeholder = False
+    if a.range:
+        lo, hi = (int(v) for v in a.range.split(":"))
+        sc.frame_start, sc.frame_end = max(1, lo), min(a.frames, hi)
     sc.render.filepath = os.path.join(a.out, "f_")
     bpy.ops.render.render(animation=True)
 
