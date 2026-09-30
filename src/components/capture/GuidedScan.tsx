@@ -3,25 +3,56 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { toFrame, snapshot } from "@/lib/recon/capture";
-import type { FaceLandmarker, FaceLandmarkerResult } from "@mediapipe/tasks-vision";
-import { fallBackToCpu, getFaceLandmarker, poseFromMatrix, preloadFaceTracking } from "@/lib/recon/mediapipe";
-import { POSE_TARGETS, REQUIRED_BINS, binForPose, mergeFrame, measureFrame } from "@/lib/recon/poses";
+import type {
+  FaceLandmarker,
+  FaceLandmarkerResult,
+} from "@mediapipe/tasks-vision";
+import {
+  fallBackToCpu,
+  getFaceLandmarker,
+  poseFromMatrix,
+  preloadFaceTracking,
+} from "@/lib/recon/mediapipe";
+import {
+  POSE_TARGETS,
+  REQUIRED_BINS,
+  binForPose,
+  mergeFrame,
+  measureFrame,
+} from "@/lib/recon/poses";
 import type { CaptureFrame, PoseBinId } from "@/lib/recon/types";
-import { haptic } from "@/lib/telegram/webapp";
-import { cn } from "@/lib/cn";
-import { Button, easeOut } from "@/components/ui/primitives";
+import { getTelegram, haptic } from "@/lib/telegram/webapp";
 
-type Hint = "center" | "noface" | "closer" | "back" | "light" | "still" | null;
+type Hint =
+  | "noface"
+  | "center"
+  | "closer"
+  | "back"
+  | "level"
+  | "light"
+  | "still"
+  | null;
 type Phase = "camera" | "tap" | "loading" | "tracking" | "error";
+/** align: frame the face and look straight (captures the front view); circle: roll the head around. */
+type Stage = "align" | "circle" | "done";
 
 /** Frames fed to the landmarker are downscaled (landmarks are normalised, so capture stays full-res). */
 const FEED_WIDTH = 480;
+const TICKS = 72;
+/** Head rotation that completes the ring: wide left/right (the cheeks and ears need it), gentle up/down. */
+const YAW_FULL = 44;
+const PITCH_FULL = 15;
+/** The scan screen is light on purpose: it lights the face like a soft box (a dim room is the #1 cause of dark twins). */
+const PAPER = "#f7f4ef";
 
 function cameraError(e: unknown): string {
   const name = e instanceof DOMException ? e.name : "";
-  if (name === "NotAllowedError" || name === "SecurityError") return "Camera access is blocked. Allow it for this site in your browser settings, or upload photos instead.";
-  if (name === "NotFoundError" || name === "OverconstrainedError") return "No front camera found. You can upload photos instead.";
-  if (name === "NotReadableError" || name === "AbortError") return "The camera is busy in another app. Close it and try again, or upload photos.";
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return "Camera access is blocked. Allow it for this site in your browser settings, or upload photos instead.";
+  if (name === "NotFoundError" || name === "OverconstrainedError")
+    return "No front camera found. You can upload photos instead.";
+  if (name === "NotReadableError" || name === "AbortError")
+    return "The camera is busy in another app. Close it and try again, or upload photos.";
   return "This browser can't open the camera here. Try Safari or Chrome, or upload photos instead.";
 }
 
@@ -35,27 +66,71 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/** Screen direction of a head pose, as in the mirrored preview: x right, y up, 1 = a full turn. */
+function screenDir(yaw: number, pitch: number) {
+  return { x: -yaw / YAW_FULL, y: -pitch / PITCH_FULL };
+}
+
+/** Where to turn for a pose bin, in words. */
+const BIN_WORDS: Partial<Record<PoseBinId, string>> = {
+  left30: "Turn a little to your left and hold",
+  left55: "Turn further to your left and hold",
+  right30: "Turn a little to your right and hold",
+  right55: "Turn further to your right and hold",
+  up: "Tilt your chin up and hold",
+  down: "Tilt your chin down and hold",
+};
+
 /**
- * Face-ID-style guided capture. The landmarker runs on every video frame;
- * a frame is kept automatically when the head pose falls in an unfilled bin,
- * the head is still, the face is sharp, well lit and large enough.
+ * Face-ID-style guided capture: frame your face in the circle (the front view
+ * is taken automatically), then roll your head slowly in a circle while a ring
+ * of ticks fills in every direction you've covered. Frames are kept
+ * automatically when the head is in a pose bin, sharp, well lit and not
+ * moving too fast; the best frame per bin wins.
  *
  * Every stage reports its state (camera → loading → tracking), failures are
  * never silent, and the tracker falls back to the CPU delegate when the GPU
  * path misbehaves (common in mobile WebKit).
  */
-export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureFrame[]) => void; onCancel: () => void; hd: boolean }) {
+export function GuidedScan({
+  onDone,
+  onCancel,
+  onUpload,
+  hd,
+}: {
+  onDone: (frames: CaptureFrame[]) => void;
+  onCancel: () => void;
+  onUpload?: () => void;
+  hd: boolean;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   const bins = useRef(new Map<PoseBinId, CaptureFrame>());
+  const ticks = useRef(new Float32Array(TICKS));
   const tapToStart = useRef<(() => void) | null>(null);
   const [filled, setFilled] = useState<PoseBinId[]>([]);
-  const [pose, setPose] = useState({ yaw: 0, pitch: 0, found: false });
-  const [hint, setHint] = useState<Hint>("center");
+  const [stage, setStage] = useState<Stage>("align");
+  const [view, setView] = useState({ ticks: new Float32Array(TICKS), dir: -1 });
+  const [hint, setHint] = useState<Hint>(null);
   const [phase, setPhase] = useState<Phase>("camera");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState(0);
   const required = hd ? POSE_TARGETS.map((p) => p.id) : REQUIRED_BINS;
-  const next = POSE_TARGETS.find((t) => required.includes(t.id) && !filled.includes(t.id));
+  const stageRef = useRef<Stage>("align");
+  stageRef.current = stage;
+
+  // Inside Telegram, match the native header to the light scan screen.
+  useEffect(() => {
+    const tg = getTelegram();
+    if (!tg) return;
+    tg.setHeaderColor(PAPER);
+    tg.setBackgroundColor(PAPER);
+    tg.setBottomBarColor?.(PAPER);
+    return () => {
+      tg.setHeaderColor("#0b0a09");
+      tg.setBackgroundColor("#0b0a09");
+      tg.setBottomBarColor?.("#0b0a09");
+    };
+  }, []);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -64,6 +139,7 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
     let last = { yaw: 0, pitch: 0, t: 0 };
     let frameNo = 0;
     let lastQuality = { brightness: 128, faceScale: 0.4, sharpness: 100 };
+    let stillSince = 0;
     const fail = (message: string) => {
       if (stopped) return;
       setError(message);
@@ -75,9 +151,14 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
       // Start the ~12 MB runtime download while the permission prompt is up.
       preloadFaceTracking();
       try {
-        if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
+        if (!navigator.mediaDevices?.getUserMedia)
+          throw new Error("unsupported");
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } },
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 960 },
+          },
           audio: false,
         });
       } catch (e) {
@@ -110,7 +191,9 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
         detector = await withTimeout(getFaceLandmarker("VIDEO"), 60_000);
       } catch (e) {
         console.error("[scan] face tracking failed to load", e);
-        return fail("Face tracking couldn't load. Check your connection and try again, or upload photos instead.");
+        return fail(
+          "Face tracking couldn't load. Check your connection and try again, or upload photos instead.",
+        );
       }
       if (stopped) return;
       setPhase("tracking");
@@ -122,15 +205,15 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
       let swapping = false;
       let lastFace = performance.now();
       // Hints only change once they've held for a moment, so the headline never flickers.
-      let pendingHint: Hint = "center";
+      let pendingHint: Hint = null;
       let pendingSince = 0;
-      let shownHint: Hint = "center";
+      let shownHint: Hint = null;
       const showHint = (h: Hint, now: number) => {
         if (h !== pendingHint) {
           pendingHint = h;
           pendingSince = now;
         }
-        if (h !== shownHint && now - pendingSince > 350) {
+        if (h !== shownHint && now - pendingSince > (h === null ? 150 : 400)) {
           shownHint = h;
           setHint(h);
         }
@@ -140,15 +223,40 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
         swapping = true;
         getFaceLandmarker("VIDEO")
           .then((d) => (detector = d))
-          .catch(() => fail("Face tracking isn't supported on this device. You can upload photos instead."))
+          .catch(() =>
+            fail(
+              "Face tracking isn't supported on this device. You can upload photos instead.",
+            ),
+          )
           .finally(() => (swapping = false));
         return true;
       };
+      const keep = (res: FaceLandmarkerResult, bin: PoseBinId) => {
+        const image = snapshot(v, v.videoWidth, v.videoHeight);
+        const frame = toFrame(res, image, "guided");
+        if (!frame || frame.quality.issues.includes("blurry")) return false;
+        frame.bin = bin;
+        const isNew = !bins.current.has(bin);
+        if (mergeFrame(bins.current, frame) && isNew) {
+          setFilled([...bins.current.keys()]);
+          setFlash((f) => f + 1);
+          haptic("tap");
+          return true;
+        }
+        return false;
+      };
+      let lastPaint = 0;
 
       const loop = () => {
         if (stopped) return;
         raf = requestAnimationFrame(loop);
-        if (swapping || v.readyState < 2 || !v.videoWidth) return;
+        if (
+          swapping ||
+          v.readyState < 2 ||
+          !v.videoWidth ||
+          stageRef.current === "done"
+        )
+          return;
         const now = performance.now();
         feed.width = FEED_WIDTH;
         feed.height = Math.round((FEED_WIDTH * v.videoHeight) / v.videoWidth);
@@ -160,16 +268,22 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
           errors = 0;
         } catch (e) {
           console.warn("[scan] tracking error", e);
-          if (++errors >= 5 && !switchToCpu()) fail("Face tracking stopped working on this device. You can upload photos instead.");
+          if (++errors >= 5 && !switchToCpu())
+            fail(
+              "Face tracking stopped working on this device. You can upload photos instead.",
+            );
           return;
         }
         frameNo++;
-        if (!res.faceLandmarks.length || !res.facialTransformationMatrixes?.length) {
+        if (
+          !res.faceLandmarks.length ||
+          !res.facialTransformationMatrixes?.length
+        ) {
           const lost = now - lastFace;
           // A GPU delegate that initialises but never finds a face: retry once on CPU.
           if (lost > 6000 && switchToCpu()) lastFace = now;
-          setPose((p) => (p.found ? { ...p, found: false } : p));
-          showHint(lost > 3000 ? "noface" : "center", now);
+          showHint(lost > 1500 ? "noface" : shownHint, now);
+          stillSince = 0;
           return;
         }
         lastFace = now;
@@ -177,34 +291,93 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
         const dt = Math.max(1, now - last.t) / 1000;
         const speed = Math.hypot(p.yaw - last.yaw, p.pitch - last.pitch) / dt;
         last = { yaw: p.yaw, pitch: p.pitch, t: now };
-        setPose({ yaw: p.yaw, pitch: p.pitch, found: true });
 
-        if (frameNo % 5 === 0) {
-          const lm = res.faceLandmarks[0].flatMap((l) => [l.x, l.y, l.z]);
-          lastQuality = measureFrame(feed, feed.width, feed.height, lm);
-        }
-        const hintNow: Hint =
-          lastQuality.faceScale < 0.28 ? "closer" : lastQuality.faceScale > 0.8 ? "back" : lastQuality.brightness < 58 ? "light" : speed > 40 ? "still" : null;
+        const lms = res.faceLandmarks[0];
+        if (frameNo % 5 === 0)
+          lastQuality = measureFrame(
+            feed,
+            feed.width,
+            feed.height,
+            lms.flatMap((l) => [l.x, l.y, l.z]),
+          );
+        // Framing, in the circle's own terms: the preview shows the centred square of the video.
+        const side = Math.min(v.videoWidth, v.videoHeight);
+        const nose = lms[1];
+        const offX = ((nose.x - 0.5) * v.videoWidth) / side;
+        const offY = ((nose.y - 0.45) * v.videoHeight) / side;
+        const faceInCircle = (lastQuality.faceScale * v.videoHeight) / side;
+
+        const s = stageRef.current;
+        let hintNow: Hint =
+          lastQuality.brightness < 55
+            ? "light"
+            : faceInCircle < 0.34
+              ? "closer"
+              : faceInCircle > 0.95
+                ? "back"
+                : s === "align" && Math.hypot(offX, offY) > 0.2
+                  ? "center"
+                  : null;
+        if (
+          !hintNow &&
+          s === "align" &&
+          Math.abs(p.pitch) > 16 &&
+          Math.abs(p.yaw) < 15
+        )
+          hintNow = "level";
+        if (!hintNow && speed > (s === "align" ? 25 : 80)) hintNow = "still";
         showHint(hintNow, now);
 
+        if (s === "align") {
+          const frontal = Math.abs(p.yaw) < 9 && Math.abs(p.pitch) < 12;
+          if (hintNow || !frontal) {
+            stillSince = 0;
+            return;
+          }
+          stillSince ||= now;
+          if (now - stillSince > 350 && keep(res, "front")) {
+            haptic("success");
+            setStage("circle");
+          }
+          return;
+        }
+
+        // circle: light up the ticks the head points at
+        const d = screenDir(p.yaw, p.pitch);
+        const mag = Math.hypot(d.x, d.y);
+        let dir = -1;
+        if (!hintNow && mag > 0.2) {
+          const ang = Math.atan2(d.y, d.x);
+          dir =
+            Math.round(
+              ((ang < 0 ? ang + Math.PI * 2 : ang) / (Math.PI * 2)) * TICKS,
+            ) % TICKS;
+          for (let k = -2; k <= 2; k++) {
+            const i = (dir + k + TICKS) % TICKS;
+            ticks.current[i] = Math.max(
+              ticks.current[i],
+              Math.min(1, mag * (1 - Math.abs(k) * 0.04)),
+            );
+          }
+        }
+        if (now - lastPaint > 60) {
+          lastPaint = now;
+          setView({ ticks: ticks.current.slice(), dir });
+        }
+
+        // keep the best frame for whichever pose bin the head is in
         const bin = binForPose(p.yaw, p.pitch);
-        if (!bin || !required.includes(bin.id) || hintNow || speed > 30) return;
+        if (!bin || !required.includes(bin.id) || hintNow) return;
         const cur = bins.current.get(bin.id);
         if (cur && cur.quality.score > 0.8) return;
-        const image = snapshot(v, v.videoWidth, v.videoHeight);
-        const frame = toFrame(res, image, "guided");
-        if (!frame || frame.quality.issues.includes("blurry")) return;
-        frame.bin = bin.id;
-        if (mergeFrame(bins.current, frame) && !cur) {
-          setFilled([...bins.current.keys()]);
-          setFlash((f) => f + 1);
-          haptic("tap");
-        }
+        keep(res, bin.id);
       };
       loop();
     })().catch((e) => {
       console.error("[scan]", e);
-      fail("Something went wrong starting the scan. You can upload photos instead.");
+      fail(
+        "Something went wrong starting the scan. You can upload photos instead.",
+      );
     });
 
     return () => {
@@ -216,24 +389,70 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const ringDone = view.ticks.every((t) => t >= 1);
+  const missing = required.filter((r) => !filled.includes(r));
   useEffect(() => {
-    if (required.every((r) => filled.includes(r))) {
+    if (stage === "circle" && missing.length === 0) {
+      setStage("done");
       haptic("success");
-      const t = setTimeout(() => onDone([...bins.current.values()]), 700);
-      return () => clearTimeout(t);
     }
-  }, [filled, required, onDone]);
+  }, [stage, missing.length]);
+  useEffect(() => {
+    if (stage !== "done") return;
+    const t = setTimeout(() => onDone([...bins.current.values()]), 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
 
-  const progress = filled.filter((f) => required.includes(f)).length / required.length;
-  const canFinishEarly = ["front", "left30", "right30"].every((b) => filled.includes(b as PoseBinId)) && filled.length >= 4;
+  const canFinishEarly =
+    stage === "circle" &&
+    ["front", "left30", "right30"].every((b) =>
+      filled.includes(b as PoseBinId),
+    ) &&
+    filled.length >= 5;
   const hintText: Record<Exclude<Hint, null>, string> = {
-    center: "Center your face in the oval",
-    noface: "Can't see your face yet — hold the phone at eye level",
+    noface: "Show your face to the camera",
+    center: "Fit your face in the circle",
     closer: "Move a little closer",
-    back: "Move back slightly",
-    light: "Find softer, brighter light",
-    still: "Hold still for a moment",
+    back: "Move back a little",
+    level: "Hold your phone at eye level",
+    light: "Find brighter light",
+    still: stage === "align" ? "Hold still" : "A bit slower",
   };
+
+  // Which part of the ring is still open, in words (the largest unfilled arc).
+  const openWords = (() => {
+    if (!ringDone) {
+      let best = -1,
+        bestLen = 0;
+      for (let k = 0; k < TICKS; k++) {
+        if (view.ticks[k] >= 1) continue;
+        let len = 0;
+        while (len < TICKS && view.ticks[(k + len) % TICKS] < 1) len++;
+        if (len > bestLen) {
+          bestLen = len;
+          best = (k + len / 2) % TICKS;
+        }
+      }
+      const covered = view.ticks.filter((t) => t >= 1).length;
+      if (covered < TICKS * 0.12) return "Slowly move your head in a circle";
+      // Mirrored preview: screen-left is the user's own left.
+      const where = [
+        "right",
+        "up and right",
+        "up",
+        "up and left",
+        "left",
+        "down and left",
+        "down",
+        "down and right",
+      ][Math.round((best / TICKS) * 8) % 8];
+      return `Keep circling — ${where} next`;
+    }
+    return missing.length
+      ? (BIN_WORDS[missing[0]] ?? "Hold still for a moment")
+      : "Perfect";
+  })();
 
   const message =
     error ??
@@ -243,113 +462,177 @@ export function GuidedScan({ onDone, onCancel, hd }: { onDone: (frames: CaptureF
         ? "Tap to start the camera"
         : phase === "loading"
           ? "Getting face tracking ready…"
-          : hint
-            ? hintText[hint]
-            : next
-              ? next.instruction
-              : "Perfect. Building your twin…");
-  const messageKey = error ? "error" : phase === "tracking" ? (hint ?? next?.id ?? "done") : phase;
+          : stage === "done"
+            ? "Perfect. Building your twin…"
+            : hint
+              ? hintText[hint]
+              : stage === "align"
+                ? "Look straight at the camera"
+                : openWords);
   const detail =
-    phase === "camera" ? "Allow camera access when your phone asks" : phase === "loading" ? "The first time takes a few seconds" : phase === "tracking" && hint === "noface" ? "Good, even light on your face helps" : null;
+    error || phase !== "tracking"
+      ? phase === "camera"
+        ? "Allow camera access when your phone asks"
+        : phase === "loading"
+          ? "The first time takes a few seconds"
+          : null
+      : stage === "align"
+        ? "Step 1 of 2 · we'll take it automatically"
+        : stage === "circle"
+          ? "Step 2 of 2 · like setting up Face ID"
+          : null;
 
   return (
-    <div className="fixed inset-0 bg-black">
-      <video ref={video} playsInline muted className="absolute inset-0 size-full -scale-x-100 object-cover" />
-      <AnimatePresence>
-        <motion.div key={flash} initial={{ opacity: 0.35 }} animate={{ opacity: 0 }} transition={{ duration: 0.5 }} className="pointer-events-none absolute inset-0 bg-white" />
-      </AnimatePresence>
-
-      {/* oval mask + progress ring */}
-      <svg className="absolute inset-0 size-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden>
-        <defs>
-          <mask id="oval">
-            <rect width="100" height="100" fill="white" />
-            <ellipse cx="50" cy="46" rx="22" ry="29" fill="black" />
-          </mask>
-        </defs>
-        <rect width="100" height="100" fill="rgba(5,5,6,0.72)" mask="url(#oval)" />
-        <ellipse cx="50" cy="46" rx="23.5" ry="30.5" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
-        <motion.ellipse
-          cx="50"
-          cy="46"
-          rx="23.5"
-          ry="30.5"
-          fill="none"
-          stroke="#f6f6f8"
-          strokeWidth="0.7"
-          strokeLinecap="round"
-          pathLength={1}
-          strokeDasharray="1 1"
-          initial={{ strokeDashoffset: 1 }}
-          animate={{ strokeDashoffset: 1 - progress }}
-          transition={{ duration: 0.6, ease: easeOut }}
-          style={{ rotate: -90, transformOrigin: "50px 46px" }}
-        />
-      </svg>
-
-      <div className="absolute inset-x-0 top-0 flex items-center justify-between p-4 pt-[calc(var(--tg-safe-top)+16px)]">
-        <Button variant="glass" size="sm" onClick={onCancel}>
+    <div
+      className="fixed inset-0 flex flex-col items-center overflow-hidden text-ink-950"
+      style={{ background: PAPER }}
+    >
+      <div className="flex w-full items-center justify-between px-4 pt-[calc(var(--tg-safe-top)+14px)]">
+        <button
+          onClick={onCancel}
+          className="h-9 rounded-full bg-ink-950/[0.06] px-4 text-[14px] font-medium text-ink-800 active:bg-ink-950/10"
+        >
           Cancel
-        </Button>
-        <span className="glass rounded-full px-3 py-1.5 text-[12px] tabular-nums text-mist-200">
-          {filled.filter((f) => required.includes(f)).length} / {required.length} angles
+        </button>
+        <span className="text-[12px] font-medium tabular-nums text-ink-500">
+          {filled.filter((f) => required.includes(f)).length} /{" "}
+          {required.length}
         </span>
       </div>
 
-      <div className="absolute inset-x-0 top-[9%] px-6 text-center">
-        {/* No exit animation: the headline must always show the current instruction. */}
-        <motion.div key={messageKey} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-          <p className="font-display text-[22px] font-semibold leading-tight text-mist-50">{message}</p>
-          {detail && <p className="mt-2 text-[14px] text-mist-300">{detail}</p>}
-        </motion.div>
+      <div className="mt-[max(2vh,8px)] flex min-h-[92px] w-full flex-1 flex-col items-center justify-center px-6 text-center">
+        <div className="flex min-h-[92px] flex-col items-center">
+          <motion.p
+            key={message}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.22 }}
+            className="font-display text-[24px] font-semibold leading-tight tracking-[-0.01em]"
+          >
+            {message}
+          </motion.p>
+          {detail && <p className="mt-2 text-[14px] text-ink-500">{detail}</p>}
+        </div>
+
+        <div
+          className="relative mt-[5vh]"
+          style={{ width: "min(76vw, 48vh, 400px)", aspectRatio: "1" }}
+        >
+          <div className="absolute inset-0 overflow-hidden rounded-full bg-ink-950 shadow-[0_30px_80px_-30px_rgba(40,30,20,0.45)]">
+            <video
+              ref={video}
+              playsInline
+              muted
+              className="size-full -scale-x-100 object-cover"
+            />
+            {(phase === "camera" || phase === "loading") && (
+              <div
+                className="absolute inset-0 grid place-items-center"
+                aria-live="polite"
+              >
+                <span className="size-9 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+              </div>
+            )}
+            {phase === "tap" && (
+              <button
+                onClick={() => tapToStart.current?.()}
+                className="absolute inset-0 grid place-items-center text-[15px] font-semibold text-mist-50"
+              >
+                Tap to start the camera
+              </button>
+            )}
+            <AnimatePresence>
+              <motion.div
+                key={flash}
+                initial={{ opacity: flash ? 0.45 : 0 }}
+                animate={{ opacity: 0 }}
+                transition={{ duration: 0.45 }}
+                className="pointer-events-none absolute inset-0 bg-white"
+              />
+            </AnimatePresence>
+          </div>
+          <ScanRing
+            ticks={view.ticks}
+            dir={stage === "circle" ? view.dir : -1}
+            stage={stage}
+          />
+        </div>
       </div>
 
-      {(phase === "camera" || phase === "loading") && (
-        <div className="absolute inset-0 grid place-items-center" aria-live="polite">
-          <span className="size-9 animate-spin rounded-full border-2 border-white/15 border-t-white/80" />
-        </div>
-      )}
-      {phase === "tap" && (
-        <div className="absolute inset-0 grid place-items-center">
-          <Button variant="solid" onClick={() => tapToStart.current?.()}>
-            Start camera
-          </Button>
-        </div>
-      )}
-
-      {/* pose map: where your nose points vs. the targets (mirrored like the preview) */}
-      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-4 pb-[calc(var(--tg-safe-bottom)+28px)]">
-        <div className="glass relative h-[92px] w-[260px] rounded-[28px]">
-          {POSE_TARGETS.filter((t) => required.includes(t.id)).map((t) => (
-            <span
-              key={t.id}
-              className={cn(
-                "absolute size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-all duration-300",
-                filled.includes(t.id) ? "border-mist-50 bg-mist-50" : t.id === next?.id ? "animate-breathe border-iris-300 bg-iris-300/30" : "border-white/30",
-              )}
-              style={{ left: `${50 - (t.yaw / 80) * 45}%`, top: `${50 + (t.pitch / 22) * 38}%` }}
-            />
-          ))}
-          {pose.found && (
-            <motion.span
-              className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-aura-300 shadow-[0_0_12px_#f4bf96]"
-              animate={{ left: `${50 - (Math.max(-80, Math.min(80, pose.yaw)) / 80) * 45}%`, top: `${50 + (Math.max(-22, Math.min(22, pose.pitch)) / 22) * 38}%` }}
-              transition={{ type: "spring", stiffness: 500, damping: 40 }}
-            />
-          )}
-        </div>
+      <div className="flex min-h-[72px] flex-col items-center justify-end gap-3 px-6 pb-[calc(var(--tg-safe-bottom)+28px)] text-center">
         {error ? (
-          <Button variant="solid" onClick={onCancel}>
+          <button
+            onClick={onUpload ?? onCancel}
+            className="h-12 rounded-full bg-ink-950 px-6 text-[15px] font-semibold text-mist-50"
+          >
             Upload photos instead
-          </Button>
+          </button>
+        ) : canFinishEarly ? (
+          <button
+            onClick={() => onDone([...bins.current.values()])}
+            className="text-[14px] text-ink-500 underline underline-offset-4"
+          >
+            Finish now with {filled.length} angles
+          </button>
         ) : (
-          canFinishEarly && (
-            <button onClick={() => onDone([...bins.current.values()])} className="text-[13px] text-mist-300 underline-offset-4 hover:text-mist-50 hover:underline">
-              Finish with {filled.length} angles
-            </button>
-          )
+          <p className="max-w-xs text-[12px] leading-5 text-ink-500">
+            Keep the phone still and turn only your head. Good light makes a
+            better twin.
+          </p>
         )}
       </div>
     </div>
+  );
+}
+
+/** Ring of ticks around the camera circle (Face ID style). */
+function ScanRing({
+  ticks,
+  dir,
+  stage,
+}: {
+  ticks: Float32Array;
+  dir: number;
+  stage: Stage;
+}) {
+  const R = 50; // circle radius in viewBox units (the ring sits just outside it)
+  return (
+    <svg
+      className="pointer-events-none absolute -inset-[13%] size-[126%]"
+      viewBox="-63 -63 126 126"
+      aria-hidden
+    >
+      {Array.from({ length: TICKS }, (_, k) => {
+        const a = (k / TICKS) * Math.PI * 2;
+        const f = stage === "done" ? 1 : stage === "align" ? 0 : ticks[k];
+        const done = f >= 1;
+        const near =
+          dir >= 0 &&
+          Math.min(Math.abs(k - dir), TICKS - Math.abs(k - dir)) <= 2;
+        const r0 = R + 4;
+        const r1 = r0 + 4 + 5 * f + (near ? 1.5 : 0);
+        const c = Math.cos(a),
+          s = -Math.sin(a); // SVG y points down; ticks go counter-clockwise from the right
+        return (
+          <line
+            key={k}
+            x1={c * r0}
+            y1={s * r0}
+            x2={c * r1}
+            y2={s * r1}
+            stroke={
+              done
+                ? "#1fae6b"
+                : near
+                  ? "rgba(20,18,16,0.55)"
+                  : `rgba(20,18,16,${0.16 + 0.3 * f})`
+            }
+            strokeWidth={1.3}
+            strokeLinecap="round"
+            style={{ transition: "stroke 0.25s" }}
+          />
+        );
+      })}
+    </svg>
   );
 }

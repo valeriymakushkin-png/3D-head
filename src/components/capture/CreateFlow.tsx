@@ -80,8 +80,8 @@ export function CreateFlow({ studioPath = "/studio" }: { studioPath?: string }) 
                 onClick={() => setStep("scan")}
                 icon={<IconCamera size={22} />}
                 title="Guided scan"
-                badge="Recommended · 15 s"
-                text="Turn your head slowly while the camera tracks 478 points. Captures itself when each angle is sharp."
+                badge="Recommended · 20 s"
+                text="Look at the camera, then roll your head in a slow circle — like setting up Face ID. Every angle is captured automatically."
               />
               <Choice
                 delay={0.25}
@@ -113,7 +113,7 @@ export function CreateFlow({ studioPath = "/studio" }: { studioPath?: string }) 
 
         {step === "scan" && (
           <motion.div key="scan" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <GuidedScan hd={false} onCancel={() => setStep("upload")} onDone={build} />
+            <GuidedScan hd={false} onCancel={() => setStep("choose")} onUpload={() => setStep("upload")} onDone={build} />
           </motion.div>
         )}
 

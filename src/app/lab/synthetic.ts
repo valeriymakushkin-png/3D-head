@@ -50,8 +50,8 @@ function syntheticRig(template: HeadAsset) {
   scene.add(key);
   // A phone front camera at arm's length (focal ≈ 0.75 × the long side).
   const camera = new PerspectiveCamera(67.4, W / H, 0.01, 10);
-  camera.position.set(0, -0.02, 0.3);
-  camera.lookAt(0, -0.03, 0);
+  camera.position.set(0, -0.045, 0.34);
+  camera.lookAt(0, -0.045, 0);
   const render = (yaw: number, pitch: number) => {
     mesh.rotation.set((pitch * Math.PI) / 180, (yaw * Math.PI) / 180, 0, "YXZ");
     renderer.render(scene, camera);
@@ -65,35 +65,25 @@ function syntheticRig(template: HeadAsset) {
 }
 
 /**
- * A scripted head turn (front → left → right → up → down) at `fps`, as JPEG
- * data URLs — fed to Chromium's fake camera to test the live guided scan.
+ * A scripted scan at `fps` — look straight, then roll the head in a slow
+ * circle (as the guided scan asks) — as JPEG data URLs, fed to Chromium's
+ * fake camera to test the live guided scan.
  */
 export function syntheticScanVideo(template: HeadAsset, fps = 15): { width: number; height: number; frames: string[] } {
   const { W, H, render, dispose } = syntheticRig(template);
-  // [yaw, pitch, seconds to get there, seconds to hold]
-  const path: Array<[number, number, number, number]> = [
-    [0, 0, 0, 1.2],
-    [28, 0, 1.2, 0.8],
-    [52, 0, 1, 0.8],
-    [0, 0, 1.6, 0.3],
-    [-28, 0, 1.2, 0.8],
-    [-52, 0, 1, 0.8],
-    [0, 0, 1.6, 0.3],
-    [0, -16, 1, 0.8],
-    [0, 16, 1.6, 0.8],
-    [0, 0, 1, 1],
-  ];
   const frames: string[] = [];
-  let [py, pp] = [0, 0];
-  for (const [yaw, pitch, move, hold] of path) {
-    const n = Math.round(move * fps);
-    for (let i = 1; i <= n; i++) {
-      const t = 0.5 - 0.5 * Math.cos((Math.PI * i) / n);
-      frames.push(render(py + (yaw - py) * t, pp + (pitch - pp) * t).toDataURL("image/jpeg", 0.9));
-    }
-    for (let i = 0; i < Math.round(hold * fps); i++) frames.push(render(yaw, pitch).toDataURL("image/jpeg", 0.9));
-    [py, pp] = [yaw, pitch];
+  const shot = (yaw: number, pitch: number) => frames.push(render(yaw, pitch).toDataURL("image/jpeg", 0.9));
+  const A = 50,
+    P = 18;
+  for (let i = 0; i < 2 * fps; i++) shot(0, 0); // look straight
+  for (let i = 1; i <= fps; i++) shot(A * (0.5 - 0.5 * Math.cos((Math.PI * i) / fps)), 0); // ease out to the left
+  const loop = 12 * fps; // one slow circle: left → up → right → down → left
+  for (let i = 1; i <= loop; i++) {
+    const th = (2 * Math.PI * i) / loop;
+    shot(A * Math.cos(th), -P * Math.sin(th));
   }
+  for (let i = 1; i <= fps; i++) shot(A * (0.5 + 0.5 * Math.cos((Math.PI * i) / fps)), 0);
+  for (let i = 0; i < fps; i++) shot(0, 0);
   dispose();
   return { width: W, height: H, frames };
 }
