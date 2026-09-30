@@ -34,6 +34,14 @@ studio, Glow Up (deterministic style engine) and exports run entirely in the
 browser. Add Supabase / Telegram / Anthropic / Stripe keys to enable accounts,
 the AI Stylist, metering and payments (see `.env.example`).
 
+## Deploy
+
+Import the repo on [Vercel](https://vercel.com/new) with default settings
+(Framework: Next.js, Root Directory empty); the production branch is `main`.
+No env vars are needed for a working demo; add them from `.env.example` to
+enable accounts, the AI Stylist and payments. Full guide:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Tests
 
 ```bash
