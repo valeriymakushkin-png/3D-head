@@ -36,18 +36,25 @@ export interface SurfaceSamples {
 export interface StrandMeshData {
   position: Float32Array;
   tangent: Int16Array;
-  /** Per vertex: t along strand, side (0|255), strand random, layer. Normalised u8. */
+  /** Per vertex: t along strand, side (0|255), strand random, occlusion (baked AO). Normalised u8. */
   attr: Uint8Array;
   index: Uint32Array;
   strandCount: number;
   pointsPerStrand: number;
   strandWidth: number;
+  /** Per vertex visibility of the four studio lights (baked self-shadowing), u8. */
+  shade?: Uint8Array;
+  /** Hair only: the head's light visibility / AO with this groom's shadow (per head vertex). */
+  skinVis?: Uint8Array;
+  skinAO?: Uint8Array;
 }
 
 export interface GenerateOptions {
   vertexBudget: number;
   maxStrands: number;
   seed: number;
+  /** Strand segment length (m). Real-time uses ~11 mm; offline renders use finer steps. */
+  segment?: number;
 }
 
 // --- PRNG ------------------------------------------------------------------
@@ -136,6 +143,8 @@ function growScalpStrand(
   L: number,
   layer: number,
   rng: () => number,
+  /** Lock-level randomness: guides get more, so neighbouring locks read apart. */
+  variation = 1,
 ) {
   const { K, sdf, rig } = ctx;
   const zones = scalpZones(p, az, h);
@@ -147,11 +156,15 @@ function growScalpStrand(
     lf[2] + (tf[2] - lf[2]) * zones.wTop,
   ]);
   flow = tangentProject(flow, n);
-  flow = rotateAround(flow, n, (rng() - 0.5) * p.messiness * 1.3);
+  flow = rotateAround(flow, n, (rng() - 0.5) * (p.messiness * 1.3 + 0.12) * variation);
 
   const shortStand = 1 - smoothstep(0.004, 0.028, L);
   let lift = clamp(p.lift * (0.55 + 0.45 * zones.wTop), 0, 0.95);
-  lift = clamp(Math.max(lift, 0.62 * shortStand) + (rng() - 0.5) * 0.35 * smoothstep(0.03, 0.008, L), 0, 0.95);
+  lift = clamp(
+    Math.max(lift, 0.62 * shortStand) + (rng() - 0.5) * 0.35 * smoothstep(0.03, 0.008, L) + (rng() - 0.5) * 0.3 * p.messiness * (variation - 0.6),
+    0,
+    0.95,
+  );
   let d = normalize([flow[0] * (1 - lift) + n[0] * lift, flow[1] * (1 - lift) + n[1] * lift, flow[2] * (1 - lift) + n[2] * lift]);
   const fl = p.frontLift * zones.frontW;
   if (fl > 0) {
@@ -311,8 +324,8 @@ class GuideGrid {
   }
 }
 
-function pointsPerStrandFor(maxLen: number) {
-  return clamp(Math.round(maxLen / 0.011) + 3, 3, 18);
+function pointsPerStrandFor(maxLen: number, segment = 0.011) {
+  return clamp(Math.round(maxLen / segment) + 3, 3, segment < 0.011 ? 48 : 18);
 }
 
 /**
@@ -326,7 +339,7 @@ export function generateHair(
   opt: GenerateOptions,
 ): StrandMeshData {
   const maxLen = Math.max(p.topLength, p.frontLength, p.sideLength, p.backLength, p.napeLength);
-  const K = pointsPerStrandFor(maxLen);
+  const K = pointsPerStrandFor(maxLen, opt.segment);
   const target = Math.min(opt.maxStrands, Math.floor(opt.vertexBudget / (2 * K)));
 
   // 1) Root selection — stable across styles thanks to per-sample randoms.
@@ -344,13 +357,16 @@ export function generateHair(
     const az = Math.atan2(sp[0], sp[2]);
     const el = Math.asin(clamp(sp[1] / r, -1, 1));
     const hl = hairlineAt(rig, az, p.recession);
-    const m = smoothstep(hl - 0.025, hl + 0.05, el);
+    // ~1 cm soft transition (a real hairline thins out; it never ends like a helmet).
+    const m = smoothstep(hl - 0.06, hl + 0.1, el);
     // Crown thinning follows recession for the clinic simulation.
     const crown = p.recession > 0 ? 1 - p.recession * 0.55 * Math.exp(-(((Math.abs(az) - Math.PI) / 0.6) ** 2 + ((el - 1.05) / 0.3) ** 2)) : 1;
     const prob = m * p.density * crown;
     if (scalp.rnd[i] >= prob) continue;
     const h = zoneHeight(rig, az, el);
-    const L = hairLengthAt(p, az, h) * (0.88 + 0.24 * ((scalp.rnd[i] * 7.31) % 1));
+    // Real hairlines are soft: the outermost hairs are shorter and sparser, never a helmet edge.
+    const edge = 0.35 + 0.65 * smoothstep(0.08, 0.85, m);
+    const L = hairLengthAt(p, az, h) * (0.88 + 0.24 * ((scalp.rnd[i] * 7.31) % 1)) * edge;
     if (L < 0.0006) continue;
     sel.push(i);
     selAz.push(az);
@@ -362,13 +378,14 @@ export function generateHair(
   const ctx: GrowContext = { rig, sdf, K, tmp: [0, 0, 0] };
 
   // 2) Guides: every 24th strand. Grow them first.
-  const GUIDE_EVERY = 24;
+  // One guide per lock; dense offline grooms get bigger, more legible locks.
+  const GUIDE_EVERY = S > 150_000 ? 40 : 24;
   const guideRoots = new Float32Array(Math.ceil(S / GUIDE_EVERY) * 3);
   const guideOf: number[] = [];
   const grid = new GuideGrid(0.012, guideRoots);
   const layers = new Float32Array(S);
   const rnds = new Float32Array(S);
-  const grow = (s: number) => {
+  const grow = (s: number, variation: number) => {
     const i = sel[s];
     const rng = mulberry32(opt.seed ^ Math.imul(i + 1, 0x9e3779b1));
     const root: Vec3 = [scalp.pos[i * 3], scalp.pos[i * 3 + 1], scalp.pos[i * 3 + 2]];
@@ -377,10 +394,10 @@ export function generateHair(
     const layer = clamp(0.35 * rng() + 0.65 * selH[s], 0, 1) * (0.35 + 0.65 * smoothstep(0.004, 0.03, selL[s]));
     layers[s] = layer;
     rnds[s] = scalp.rnd[i];
-    growScalpStrand(ctx, p, points, s * K * 3, root, n, selAz[s], selH[s], selL[s], layer, rng);
+    growScalpStrand(ctx, p, points, s * K * 3, root, n, selAz[s], selH[s], selL[s], layer, rng, variation);
   };
   for (let s = 0; s < S; s += GUIDE_EVERY) {
-    grow(s);
+    grow(s, 1.9);
     const g = s / GUIDE_EVERY;
     guideRoots[g * 3] = points[s * K * 3];
     guideRoots[g * 3 + 1] = points[s * K * 3 + 1];
@@ -391,7 +408,7 @@ export function generateHair(
   // 3) Children, clumped towards their nearest guide.
   for (let s = 0; s < S; s++) {
     if (s % GUIDE_EVERY === 0) continue;
-    grow(s);
+    grow(s, 0.7);
     if (p.clump <= 0.01) continue;
     const o = s * K * 3;
     const g = grid.nearest(points[o], points[o + 1], points[o + 2]);
@@ -406,10 +423,12 @@ export function generateHair(
     rnds[s] = rnds[s] * 0.4 + rnds[gs] * 0.6; // clumps share a tone
     for (let k = 1; k < K; k++) {
       const t = k / (K - 1);
-      const w = c0 * Math.pow(t, 0.9);
-      const ox = points[go + k * 3] + dx * (1 - t);
-      const oy = points[go + k * 3 + 1] + dy * (1 - t);
-      const oz = points[go + k * 3 + 2] + dz * (1 - t);
+      const w = c0 * Math.pow(t, 0.65);
+      // Tips gather towards the lock but keep ~30 % of their spread, so locks have body.
+      const keep = 1 - 0.7 * t;
+      const ox = points[go + k * 3] + dx * keep;
+      const oy = points[go + k * 3 + 1] + dy * keep;
+      const oz = points[go + k * 3 + 2] + dz * keep;
       points[o + k * 3] += (ox - points[o + k * 3]) * w;
       points[o + k * 3 + 1] += (oy - points[o + k * 3 + 1]) * w;
       points[o + k * 3 + 2] += (oz - points[o + k * 3 + 2]) * w;

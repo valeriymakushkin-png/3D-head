@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HeroTwinLazy } from "@/components/landing/HeroTwinLazy";
+import { HeroVideo } from "@/components/landing/HeroVideo";
 import { Reveal } from "@/components/landing/Reveal";
 import { IconCheck, IconChevron, IconCube, IconHd, IconShield, IconSparkle, IconTelegram, IconWand } from "@/components/ui/icons";
 import { Wordmark } from "@/components/ui/Logo";
@@ -61,12 +61,12 @@ function Nav() {
 }
 
 const LOOKS = [
-  { src: "/looks/quiff.jpg", label: "Quiff" },
-  { src: "/looks/pompadour.jpg", label: "Pompadour" },
   { src: "/looks/textured-crop.jpg", label: "Textured Crop" },
-  { src: "/looks/undercut-platinum.jpg", label: "Undercut" },
-  { src: "/looks/buzz-aviator.jpg", label: "Buzz Cut" },
   { src: "/looks/french-crop.jpg", label: "French Crop" },
+  { src: "/looks/quiff.jpg", label: "Quiff" },
+  { src: "/looks/taper-fade.jpg", label: "Taper Fade" },
+  { src: "/looks/undercut.jpg", label: "Undercut" },
+  { src: "/looks/buzz-cut.jpg", label: "Buzz Cut" },
 ];
 
 function Hero() {
@@ -74,9 +74,11 @@ function Hero() {
     <section className="relative md:min-h-[100svh]">
       <div className="absolute inset-0 bg-[radial-gradient(70%_55%_at_50%_28%,#2a241f_0%,#120f0d_58%,#0b0a09_100%)] md:bg-[radial-gradient(55%_60%_at_68%_45%,#2a241f_0%,#110f0d_60%,#0b0a09_100%)]" />
       {/* The twin: top of the screen on phones (text sits below it, never over the face), right side on desktop. */}
-      <div className="absolute inset-x-0 top-0 h-[66svh] md:left-auto md:right-0 md:h-[100svh] md:w-[60%]">
-        <HeroTwinLazy />
+      <div className="absolute inset-x-0 top-0 h-[66svh] overflow-hidden md:left-auto md:right-0 md:h-[100svh] md:w-[60%]">
+        <HeroVideo className="size-full object-cover object-[50%_30%]" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-b from-transparent via-ink-950/70 to-ink-950 md:hidden" />
+        <div className="pointer-events-none absolute inset-y-0 left-0 hidden w-[28%] bg-gradient-to-r from-ink-950 to-transparent md:block" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-[22%] bg-gradient-to-b from-transparent to-ink-950 md:block" />
       </div>
       <div className="stage-vignette absolute inset-x-0 top-0 hidden h-[100svh] md:block" />
       <div className="relative mx-auto flex max-w-7xl flex-col px-5 pt-[56svh] md:min-h-[100svh] md:justify-center md:px-8 md:pt-24">
@@ -117,7 +119,7 @@ function LookStrip() {
         {LOOKS.map((l) => (
           <figure key={l.src} className="w-[38%] shrink-0 snap-start sm:w-[24%] md:w-auto">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={l.src} alt={`${l.label} on a 3D twin`} width={360} height={440} loading="lazy" className="aspect-[9/11] w-full rounded-[18px] bg-ink-800 object-cover" />
+            <img src={l.src} alt={`${l.label} on a 3D twin`} width={540} height={660} loading="lazy" className="aspect-[9/11] w-full rounded-[18px] bg-ink-800 object-cover" />
             <figcaption className="mt-2 truncate text-center text-[12px] text-mist-300">{l.label}</figcaption>
           </figure>
         ))}

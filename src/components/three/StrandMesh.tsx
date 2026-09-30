@@ -14,6 +14,7 @@ export function strandGeometry(data: StrandMeshData): BufferGeometry {
   g.setAttribute("position", new BufferAttribute(data.position, 3));
   g.setAttribute("aTangent", new BufferAttribute(data.tangent, 3, true));
   g.setAttribute("aHair", new BufferAttribute(data.attr, 4, true));
+  g.setAttribute("aShade", new BufferAttribute(data.shade ?? new Uint8Array((data.position.length / 3) * 4).fill(255), 4, true));
   g.setIndex(new BufferAttribute(data.index, 1));
   g.computeBoundingSphere();
   if (!g.boundingSphere || Number.isNaN(g.boundingSphere.radius)) g.boundingSphere = new Sphere(new Vector3(), 0.5);

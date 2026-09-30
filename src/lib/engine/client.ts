@@ -35,6 +35,18 @@ class AvatarEngine {
   private preparedResolvers = new Map<string, { resolve: () => void; reject: (e: Error) => void }>();
   private watchdogs = new Map<string, ReturnType<typeof setTimeout>>();
   private latestByChannel = new Map<string, number>();
+  private skinBase = new Map<string, { vis: Uint8Array; ao: Uint8Array }>();
+  private skinListeners = new Set<() => void>();
+
+  /** The head's baked lighting without any groom (available once prepared). */
+  baseSkin(headId: string) {
+    return this.skinBase.get(headId) ?? null;
+  }
+
+  onSkinBase(cb: () => void) {
+    this.skinListeners.add(cb);
+    return () => this.skinListeners.delete(cb);
+  }
 
   private send(msg: WorkerRequest) {
     if (this.mode === "idle") this.startWorker();
@@ -101,6 +113,8 @@ class AvatarEngine {
 
   private onMessage(msg: WorkerResponse) {
     if (msg.type === "prepared") {
+      this.skinBase.set(msg.headId, { vis: msg.skinVis, ao: msg.skinAO });
+      this.skinListeners.forEach((cb) => cb());
       clearTimeout(this.watchdogs.get(msg.headId));
       this.watchdogs.delete(msg.headId);
       this.preparedResolvers.get(msg.headId)?.resolve();
@@ -109,6 +123,9 @@ class AvatarEngine {
         console.info(`[engine] prepared ${msg.headId} in ${msg.ms.toFixed(0)}ms (${msg.scalpRoots} roots, ${msg.faceSamples} face samples)`);
       }
     } else if (msg.type === "strands") {
+      if (process.env.NODE_ENV !== "production") {
+        console.info(`[engine] ${msg.kind} ${msg.data.strandCount} strands in ${msg.ms.toFixed(0)}ms`);
+      }
       const p = this.pending.get(msg.reqId);
       this.pending.delete(msg.reqId);
       this.requestMsgs.delete(msg.reqId);

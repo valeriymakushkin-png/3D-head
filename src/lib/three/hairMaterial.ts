@@ -12,7 +12,8 @@ import { lightUniforms } from "@/lib/three/lighting";
  */
 const vertexShader = /* glsl */ `
   attribute vec3 aTangent;
-  attribute vec4 aHair; // t, side, rand, layer
+  attribute vec4 aHair; // t, side, rand, occlusion
+  attribute vec4 aShade; // baked visibility of the four studio lights
   uniform float uWidth;
   uniform float uPixelSize; // world size of one pixel at distance 1
   varying vec3 vT;
@@ -21,6 +22,7 @@ const vertexShader = /* glsl */ `
   varying float vRand;
   varying float vLayer;
   varying float vCoverage;
+  varying vec4 vShade;
   #include <common>
   #include <logdepthbuf_pars_vertex>
   void main() {
@@ -42,6 +44,7 @@ const vertexShader = /* glsl */ `
     vt = t;
     vRand = aHair.z;
     vLayer = aHair.w;
+    vShade = aShade;
     gl_Position = projectionMatrix * viewMatrix * world;
     #include <logdepthbuf_vertex>
   }
@@ -65,6 +68,7 @@ const fragmentShader = /* glsl */ `
   varying float vRand;
   varying float vLayer;
   varying float vCoverage;
+  varying vec4 vShade;
   #include <common>
   #include <logdepthbuf_pars_fragment>
   void main() {
@@ -76,21 +80,25 @@ const fragmentShader = /* glsl */ `
     vec3 base = mix(uRoot, uTip, smoothstep(0.05, 1.0, vt));
     if (fract(vRand * 7.31) < uAltShare) base = uAlt;
     base *= tone;
-    float ao = mix(0.32, 1.0, smoothstep(0.0, 0.6, vt)) * mix(0.66, 1.0, vLayer);
+    // Baked occlusion (depth inside the groom) plus a gentle root darkening.
+    float ao = vLayer * mix(0.55, 1.0, smoothstep(0.0, 0.5, vt));
     vec3 col = mix(uAmbientBottom, uAmbientTop, N.y * 0.5 + 0.5) * base * ao * 1.5;
     vec3 T1 = normalize(T + N * 0.1);
     vec3 T2 = normalize(T - N * 0.14);
     for (int i = 0; i < 4; i++) {
       vec3 L = uLightDir[i];
+      // Deep-opacity self-shadowing, softened so no strand goes fully black.
+      float sh = 0.12 + 0.88 * vShade[i];
       float wrap = clamp((dot(N, L) + 0.5) / 1.5, 0.0, 1.0);
       vec3 H = normalize(L + V);
       float d1 = dot(T1, H);
       float d2 = dot(T2, H);
       float s1 = pow(sqrt(max(0.0, 1.0 - d1 * d1)), 220.0);
       float s2 = pow(sqrt(max(0.0, 1.0 - d2 * d2)), 48.0);
-      float back = pow(clamp(dot(-L, V), 0.0, 1.0), 3.0) * (1.0 - 0.4 * vLayer);
+      // Transmission through thin tips toward back lights (the halo in rim light).
+      float back = pow(clamp(dot(-L, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * vt);
       vec3 spec = (vec3(s1) * 0.22 + s2 * base * 1.0) * uShine;
-      col += uLightCol[i] * ((base * wrap + spec * wrap) * ao + base * back * 0.9 * ao);
+      col += uLightCol[i] * sh * ((base * wrap * ao + spec * wrap) + base * back * 0.9);
     }
     float alpha = vCoverage * (1.0 - smoothstep(0.78, 1.0, vt) * 0.65) * uOpacity;
     gl_FragColor = vec4(col, alpha);

@@ -4,6 +4,7 @@ import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { getFaceLandmarker, poseFromMatrix } from "@/lib/recon/mediapipe";
 import { POSE_TARGETS, binForPose, measureFrame, scoreQuality } from "@/lib/recon/poses";
 import type { CaptureFrame } from "@/lib/recon/types";
+import { decodeImage } from "@/lib/media/decode";
 
 const MAX_SIDE = 1600;
 
@@ -52,9 +53,9 @@ export async function framesFromPhotos(files: File[], onEach?: (done: number, to
   const rejected: string[] = [];
   for (const [i, file] of files.entries()) {
     try {
-      const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
-      const canvas = snapshot(bmp, bmp.width, bmp.height);
-      bmp.close();
+      const img = await decodeImage(file);
+      const canvas = snapshot(img.source, img.width, img.height);
+      img.close();
       const f = toFrame(detector.detect(canvas), canvas, "upload");
       if (f) frames.push(f);
       else rejected.push(file.name);
@@ -70,20 +71,33 @@ export async function framesFromPhotos(files: File[], onEach?: (done: number, to
 export async function framesFromVideo(file: File, onProgress?: (p: number) => void): Promise<CaptureFrame[]> {
   const url = URL.createObjectURL(file);
   const video = document.createElement("video");
-  video.src = url;
+  // iOS: muted + inline must be set before the source, and a video that has
+  // never played may paint black frames into a canvas — prime it with play/pause.
   video.muted = true;
   video.playsInline = true;
+  video.setAttribute("playsinline", "");
+  video.preload = "auto";
+  video.src = url;
   await new Promise<void>((res, rej) => {
-    video.onloadedmetadata = () => res();
-    video.onerror = () => rej(new Error("Unsupported video"));
+    video.onloadeddata = () => res();
+    video.onerror = () => rej(new Error("This video format isn't supported here. Try photos instead."));
   });
+  try {
+    await video.play();
+    video.pause();
+  } catch {
+    /* seeking still works where autoplay is refused */
+  }
   const detector = await getFaceLandmarker("VIDEO");
   const duration = Math.min(video.duration, 30);
   const out: CaptureFrame[] = [];
   let ts = 0;
   for (let t = 0.05; t < duration; t += 0.15) {
     video.currentTime = t;
-    await new Promise<void>((res) => (video.onseeked = () => res()));
+    await new Promise<void>((res) => {
+      const done = setTimeout(res, 1500); // a stuck seek must not hang the whole import
+      video.onseeked = () => (clearTimeout(done), res());
+    });
     const canvas = snapshot(video, video.videoWidth, video.videoHeight);
     ts += 150;
     const f = toFrame(detector.detectForVideo(canvas, ts), canvas, "video");

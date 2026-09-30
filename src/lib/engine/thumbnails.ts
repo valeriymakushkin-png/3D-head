@@ -24,6 +24,7 @@ import { AMBIENT, STUDIO_LIGHTS } from "@/lib/three/lighting";
 import { writeMasks } from "@/lib/three/masks";
 import { createSkinMaterial, updateSkinUniforms, type SkinMaterial } from "@/lib/three/skinMaterial";
 import { strandGeometry } from "@/components/three/StrandMesh";
+import { writeSkinShade } from "@/components/three/HeadMesh";
 
 /** Thumbnail cache + work queue (latest category first). */
 interface ThumbState {
@@ -114,6 +115,7 @@ export class ThumbnailFactory {
     setHairColor(this.hairMat, color);
     setHairColor(this.beardMat, color, 0.85);
     writeMasks(this.head.geometry.getAttribute("aMask") as BufferAttribute, this.head.geometry.getAttribute("position").array, a.rig, a.statics, hp, bp);
+    writeSkinShade(this.head.geometry, hair.skinVis && hair.skinAO ? { vis: hair.skinVis, ao: hair.skinAO } : avatarEngine.baseSkin(a.id));
     updateSkinUniforms(this.skin, look, a.bakedBeard, hp, bp, color);
     this.extras.children.forEach((c) => disposeGroup(c as Group));
     this.extras.clear();

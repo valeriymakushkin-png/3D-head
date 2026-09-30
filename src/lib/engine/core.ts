@@ -8,15 +8,26 @@ import { BufferAttribute, BufferGeometry, DoubleSide, Ray, Triangle, Vector3 } f
 import { MeshBVH } from "three-mesh-bvh";
 import { generateBeard, generateHair, mulberry32, type SurfaceSamples } from "@/lib/hair/generate";
 import type { SdfGrid } from "@/lib/hair/sdf";
-import { type HeadRig, LM, clamp, hairlineAt, lmk } from "@/lib/head/rig";
+import { type HeadRig, LM, type Vec3, clamp, hairlineAt, lmk } from "@/lib/head/rig";
 import { QUALITY_BUDGETS, type QualityTier, type WorkerRequest, type WorkerResponse } from "@/lib/engine/protocol";
+import { buildDensity, emptyDensity, shadeSkin, shadeStrands } from "@/lib/hair/shading";
+import { STUDIO_LIGHTS } from "@/lib/three/lighting";
 
 interface HeadState {
   rig: HeadRig;
   sdf: SdfGrid;
   scalp: SurfaceSamples;
   face: SurfaceSamples;
+  positions: Float32Array;
+  normals: Float32Array;
 }
+
+/** Directions towards the studio lights, head space (same order as the three.js lights). */
+const LIGHTS: Vec3[] = STUDIO_LIGHTS.map((l) => {
+  const [x, y, z] = l.position;
+  const n = Math.hypot(x, y, z);
+  return [x / n, y / n, z / n];
+});
 
 export type PostFn = (msg: WorkerResponse, transfer?: Transferable[]) => void;
 
@@ -29,13 +40,20 @@ export function createAvatarCore(post: PostFn): (msg: WorkerRequest) => void {
         const t0 = performance.now();
         const state = prepare(msg.positions, msg.normals, msg.index, msg.rig, msg.quality);
         heads.set(msg.headId, state);
-        post({
-          type: "prepared",
-          headId: msg.headId,
-          ms: performance.now() - t0,
-          scalpRoots: state.scalp.count,
-          faceSamples: state.face.count,
-        });
+        // Bald / no-groom lighting: the head's own soft shadows and cavities.
+        const skin = shadeSkin(state.positions, state.normals, emptyDensity(), state.sdf, LIGHTS);
+        post(
+          {
+            type: "prepared",
+            headId: msg.headId,
+            ms: performance.now() - t0,
+            scalpRoots: state.scalp.count,
+            faceSamples: state.face.count,
+            skinVis: skin.vis,
+            skinAO: skin.ao,
+          },
+          [skin.vis.buffer, skin.ao.buffer],
+        );
       } else if (msg.type === "hair" || msg.type === "beard") {
         const head = heads.get(msg.headId);
         if (!head) throw new Error(`head ${msg.headId} not prepared`);
@@ -47,16 +65,33 @@ export function createAvatarCore(post: PostFn): (msg: WorkerRequest) => void {
                 vertexBudget: b.hairVerts,
                 maxStrands: b.hairStrands,
                 seed: msg.seed,
+                segment: b.segment,
               })
             : generateBeard(head.rig, head.sdf, head.face, msg.params, {
                 vertexBudget: b.beardVerts,
                 maxStrands: b.beardVerts / 4,
                 seed: msg.seed,
               });
-        post(
-          { type: "strands", headId: msg.headId, reqId: msg.reqId, kind: msg.type, data, ms: performance.now() - t0 },
-          [data.position.buffer, data.tangent.buffer, data.attr.buffer, data.index.buffer],
-        );
+        const transfer: Transferable[] = [data.position.buffer, data.tangent.buffer, data.attr.buffer, data.index.buffer];
+        if (msg.quality !== "offline" && data.strandCount > 0) {
+          // Baked deep-opacity lighting: strands shadow each other, the head and the skin.
+          const t1 = performance.now();
+          const grid = buildDensity(data);
+          const t2 = performance.now();
+          data.shade = shadeStrands(data, grid, head.sdf, LIGHTS, head.rig.center);
+          const t3 = performance.now();
+          if (process.env.NODE_ENV !== "production") {
+            console.info(`[engine] ${msg.type}: grow ${(t1 - t0).toFixed(0)}ms, density ${(t2 - t1).toFixed(0)}ms, shade ${(t3 - t2).toFixed(0)}ms`);
+          }
+          transfer.push(data.shade.buffer);
+          if (msg.type === "hair") {
+            const skin = shadeSkin(head.positions, head.normals, grid, head.sdf, LIGHTS);
+            data.skinVis = skin.vis;
+            data.skinAO = skin.ao;
+            transfer.push(skin.vis.buffer, skin.ao.buffer);
+          }
+        }
+        post({ type: "strands", headId: msg.headId, reqId: msg.reqId, kind: msg.type, data, ms: performance.now() - t0 }, transfer);
       } else if (msg.type === "dispose") {
         heads.delete(msg.headId);
       }
@@ -90,7 +125,7 @@ function prepare(
   const scalp = sampleScalp(bvh, positions, normals, idx, rig, budget.scalpCandidates, rng);
   const face = sampleFace(positions, normals, idx, rig, budget.faceCandidates, rng);
   const sdf = buildSdf(bvh, positions, idx, rig);
-  return { rig, sdf, scalp, face };
+  return { rig, sdf, scalp, face, positions, normals };
 }
 
 /** Candidate hair roots: rays from the cranium centre to the scalp. */

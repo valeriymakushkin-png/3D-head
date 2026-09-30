@@ -8,6 +8,27 @@ import type { BeardParams, HairColorSpec, HairParams } from "@/lib/hair/params";
 import { writeMasks } from "@/lib/three/masks";
 import { createSkinMaterial, updateSkinUniforms } from "@/lib/three/skinMaterial";
 
+export interface SkinShade {
+  vis: Uint8Array;
+  ao: Uint8Array;
+}
+
+/** Writes baked light visibility / AO (from the engine) onto a head geometry. */
+export function writeSkinShade(geometry: import("three").BufferGeometry, shade: SkinShade | null) {
+  const vis = geometry.getAttribute("aLightVis") as BufferAttribute | undefined;
+  const ao = geometry.getAttribute("aSkinAO") as BufferAttribute | undefined;
+  if (!vis || !ao) return;
+  if (shade && shade.vis.length === vis.array.length && shade.ao.length === ao.array.length) {
+    (vis.array as Uint8Array).set(shade.vis);
+    (ao.array as Uint8Array).set(shade.ao);
+  } else {
+    (vis.array as Uint8Array).fill(255);
+    (ao.array as Uint8Array).fill(255);
+  }
+  vis.needsUpdate = true;
+  ao.needsUpdate = true;
+}
+
 /**
  * The head surface. Geometry is shared between every Avatar instance of the
  * same asset (main view, compare view); each instance owns its material so
@@ -22,8 +43,10 @@ export function HeadMesh({
   hair,
   beard,
   hairColor,
+  skinShade = null,
   cloneGeometry = false,
 }: {
+  skinShade?: SkinShade | null;
   asset: HeadAsset;
   look: Look;
   hair: HairParams | null;
@@ -49,6 +72,10 @@ export function HeadMesh({
       beard,
     );
   }, [geometry, asset, hair, beard]);
+
+  useEffect(() => {
+    writeSkinShade(geometry, skinShade);
+  }, [geometry, skinShade]);
 
   useEffect(() => {
     updateSkinUniforms(material, look, asset.bakedBeard, hair, beard, hairColor);

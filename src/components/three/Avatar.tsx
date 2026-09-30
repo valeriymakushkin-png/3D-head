@@ -17,7 +17,7 @@ import {
 import type { HeadAsset } from "@/lib/head/asset";
 import { buildAccessories } from "@/lib/three/accessories";
 import { buildGlasses, disposeGroup } from "@/lib/three/glasses";
-import { HeadMesh } from "@/components/three/HeadMesh";
+import { HeadMesh, type SkinShade } from "@/components/three/HeadMesh";
 import { StrandMesh } from "@/components/three/StrandMesh";
 
 function useStrands(
@@ -75,6 +75,18 @@ export function Avatar({ asset, look, quality, channel = "main", isolated = fals
   const hair = useStrands("hair", channel, asset, hairParams, quality, onBusy);
   const beard = useStrands("beard", channel, asset, beardParams, quality);
 
+  // Baked skin lighting: with this groom's shadows when we have them, else the bare head's.
+  const [baseSkin, setBaseSkin] = useState<SkinShade | null>(() => avatarEngine?.baseSkin(asset.id) ?? null);
+  useEffect(() => {
+    setBaseSkin(avatarEngine.baseSkin(asset.id));
+    const off = avatarEngine.onSkinBase(() => setBaseSkin(avatarEngine.baseSkin(asset.id)));
+    return () => void off();
+  }, [asset.id]);
+  const skinShade = useMemo<SkinShade | null>(
+    () => (hairParams && hair?.skinVis && hair.skinAO ? { vis: hair.skinVis, ao: hair.skinAO } : baseSkin),
+    [hairParams, hair, baseSkin],
+  );
+
   const glasses = useMemo<Group | null>(
     () => (look.glasses.style === "none" ? null : buildGlasses(look.glasses.style, asset.rig, look.glasses.tint)),
     [look.glasses.style, look.glasses.tint, asset.rig],
@@ -93,7 +105,7 @@ export function Avatar({ asset, look, quality, channel = "main", isolated = fals
 
   useEffect(() => {
     bumpScene();
-  }, [hair, beard, glasses, accessories, look.skin, hairColor]);
+  }, [hair, beard, glasses, accessories, look.skin, hairColor, skinShade]);
 
   return (
     <group name="avatar">
@@ -103,6 +115,7 @@ export function Avatar({ asset, look, quality, channel = "main", isolated = fals
         hair={hairParams}
         beard={beardParams}
         hairColor={hairColor}
+        skinShade={skinShade}
         cloneGeometry={isolated}
       />
       <StrandMesh name="hair" data={hair} color={hairColor} center={asset.rig.center} />

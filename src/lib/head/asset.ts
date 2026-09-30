@@ -1,5 +1,6 @@
 "use client";
 
+import { decodeImage } from "@/lib/media/decode";
 import {
   BufferAttribute,
   Color,
@@ -123,6 +124,9 @@ export function prepareHeadGeometry(geometry: BufferGeometry, rig: HeadRig, alre
   if (!geometry.getAttribute("normal")) geometry.computeVertexNormals();
   const n = geometry.getAttribute("position").count;
   geometry.setAttribute("aMask", new BufferAttribute(new Float32Array(n * 4), 4));
+  // Baked studio lighting (engine/core → hair/shading): fully lit until the worker reports.
+  geometry.setAttribute("aLightVis", new BufferAttribute(new Uint8Array(n * 4).fill(255), 4, true));
+  geometry.setAttribute("aSkinAO", new BufferAttribute(new Uint8Array(n).fill(255), 1, true));
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
@@ -221,7 +225,7 @@ export async function loadInstantHead(record: import("@/lib/recon/storage").Inst
   const [geometry, normalMap, bitmap] = await Promise.all([
     loadTemplateGeometry(),
     loadTexture(TEMPLATE.normal, false, true),
-    createImageBitmap(record.albedo, { imageOrientation: "none" }),
+    decodeImage(record.albedo),
   ]);
   geometry.setAttribute("position", new BufferAttribute(record.positions.slice(), 3));
   geometry.deleteAttribute("normal");
@@ -230,7 +234,7 @@ export async function loadInstantHead(record: import("@/lib/recon/storage").Inst
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+  canvas.getContext("2d")!.drawImage(bitmap.source, 0, 0);
   bitmap.close();
   const albedo = new Texture(canvas);
   // Baked atlases are written top-down like the template, so the same flip applies.

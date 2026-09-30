@@ -3,7 +3,7 @@
 import { useThree } from "@react-three/fiber";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { BufferGeometry, Float32BufferAttribute, type Texture } from "three";
+import { AgXToneMapping, BufferGeometry, Float32BufferAttribute, NeutralToneMapping, type Texture } from "three";
 import { Avatar } from "@/components/three/Avatar";
 import { AvatarCanvas } from "@/components/three/AvatarCanvas";
 import { StudioStage } from "@/components/three/Stage";
@@ -18,6 +18,9 @@ import {
   HairColorId,
 } from "@/lib/avatar/look";
 import type { QualityTier } from "@/lib/engine/protocol";
+import { avatarEngine } from "@/lib/engine/client";
+import { HAIRSTYLE_PRESETS, resolveBeardParams, resolveHairColor, resolveHairParams } from "@/lib/hair/params";
+import { writeMasks } from "@/lib/three/masks";
 import { useSceneVersion } from "@/lib/engine/sceneBus";
 import { type HeadAsset, TEMPLATE, loadInstantHead, loadTemplateGeometry, loadTemplateHead, loadTexture } from "@/lib/head/asset";
 import { reconstructInstantTwin } from "@/lib/recon/reconstruct";
@@ -166,7 +169,14 @@ function LabScene({ recon = false }: { recon?: boolean }) {
 
   return (
     <div className="fixed inset-0 bg-[radial-gradient(90%_70%_at_50%_35%,#2a241f_0%,#0b0a09_75%)]">
-      <AvatarCanvas frameloop="demand">
+      <AvatarCanvas
+        frameloop="demand"
+        onCreated={({ gl }) => {
+          // A/B tone mapping for visual QA: /lab?tm=agx
+          gl.toneMapping = q.get("tm") === "agx" ? AgXToneMapping : NeutralToneMapping;
+          gl.toneMappingExposure = Number(q.get("exp") ?? 1);
+        }}
+      >
         <FixedCamera view={view} />
         <Invalidator />
         <StudioStage />
@@ -211,6 +221,7 @@ function LabRouter() {
   const q = useSearchParams();
   const mode = q.get("mode");
   if (mode === "synth") return <SynthShots />;
+  if (mode === "export") return <ExportDump />;
   return mode === "rig" ? <RigBuilder /> : <LabScene recon={mode === "recon"} />;
 }
 
@@ -232,4 +243,79 @@ function SynthShots() {
     })().catch((e) => (window.__ERR__ = String(e)));
   }, []);
   return <pre className="p-6 text-mist-200">{n ? `${n} synthetic frames ready` : "rendering…"}</pre>;
+}
+
+/**
+ * Offline-render export: the template head (engine space, metres) and the hair
+ * / beard strands of a look as centre-line polylines, for the Blender Cycles
+ * renders used on the landing page. Exposed as window.__EXPORT__ (base64).
+ */
+function ExportDump() {
+  const q = useSearchParams();
+  const [status, setStatus] = useState("exporting…");
+  useEffect(() => {
+    (async () => {
+      const asset = await loadTemplateHead();
+      const hs = HairstyleId.safeParse(q.get("hair"));
+      const bd = BeardId.safeParse(q.get("beard"));
+      const look = applyLookPatch(LookSchema.parse(DEFAULT_LOOK), {
+        hair: {
+          ...(hs.success ? { style: hs.data } : {}),
+          ...(q.get("len") ? { length: Number(q.get("len")) } : {}),
+          ...(q.get("vol") ? { volume: Number(q.get("vol")) } : {}),
+          ...(q.get("tex") ? { texture: Number(q.get("tex")) } : {}),
+        },
+        beard: bd.success ? { style: bd.data } : undefined,
+      });
+      const quality = (q.get("q") ?? "ultra") as QualityTier;
+      const b64 = (a: ArrayBufferView) => {
+        const u8 = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+        let out = "";
+        for (let i = 0; i < u8.length; i += 0x8000) out += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+        return btoa(out);
+      };
+      const strands = (d: Awaited<ReturnType<typeof avatarEngine.hair>>) => {
+        if (!d) return null;
+        const S = d.strandCount,
+          K = d.pointsPerStrand;
+        // Ribbons carry two vertices per point that share the centre line.
+        const pts = new Float32Array(S * K * 3);
+        const rnd = new Uint8Array(S);
+        for (let s = 0; s < S; s++) {
+          rnd[s] = d.attr[s * K * 2 * 4 + 2];
+          for (let k = 0; k < K; k++) pts.set(d.position.subarray((s * K + k) * 2 * 3, (s * K + k) * 2 * 3 + 3), (s * K + k) * 3);
+        }
+        return { S, K, width: d.strandWidth, points: b64(pts), rnd: b64(rnd) };
+      };
+      const hairParams = resolveHairParams(look.hair, asset.natural);
+      const beardParams = resolveBeardParams(look.beard);
+      const hair = hairParams ? await avatarEngine.hair("export", asset, hairParams, quality) : null;
+      const beard = beardParams ? await avatarEngine.beard("export", asset, beardParams, quality) : null;
+      const g = asset.geometry;
+      // Per-vertex skin masks for this look: beard shadow, beard zone, scalp coverage, features.
+      const mask = new Float32BufferAttribute(new Float32Array(g.getAttribute("position").count * 4), 4);
+      writeMasks(mask, g.getAttribute("position").array, asset.rig, asset.statics, hairParams, beardParams);
+      // Whole scalp (what a buzz cut covers): faded areas still read as scalp, not bare skin.
+      const scalpArea = new Float32BufferAttribute(new Float32Array(g.getAttribute("position").count * 4), 4);
+      writeMasks(scalpArea, g.getAttribute("position").array, asset.rig, asset.statics, HAIRSTYLE_PRESETS.buzz_cut, null);
+      (window as unknown as { __EXPORT__: unknown }).__EXPORT__ = {
+        head: {
+          mask: b64(mask.array as Float32Array),
+          scalp: b64(Float32Array.from({ length: scalpArea.count }, (_, i) => (scalpArea.array as Float32Array)[i * 4 + 2])),
+          position: b64(g.getAttribute("position").array as Float32Array),
+          uv: b64(g.getAttribute("uv").array as Float32Array),
+          index: b64(Uint32Array.from(g.index!.array)),
+        },
+        rig: asset.rig,
+        hairColor: resolveHairColor(look.hair, asset.natural),
+        hair: strands(hair),
+        beard: strands(beard),
+      };
+      setStatus(`exported ${hair?.strandCount ?? 0} hair strands, ${beard?.strandCount ?? 0} beard strands`);
+    })().catch((e) => {
+      window.__ERR__ = String(e);
+      setStatus(`error: ${e}`);
+    });
+  }, [q]);
+  return <pre className="p-6 text-sm text-mist-200">{status}</pre>;
 }

@@ -1,4 +1,29 @@
-import { Color, MeshPhysicalMaterial, type Texture, Vector2 } from "three";
+import { Color, MeshPhysicalMaterial, ShaderChunk, type Texture, Vector2 } from "three";
+
+/**
+ * Skin diffuse with a subsurface approximation: light wraps past the
+ * terminator per channel (red travels furthest in skin), so shadow edges go
+ * warm and soft instead of grey — the single biggest "is it real" cue.
+ */
+const SKIN_DIRECT = ShaderChunk.lights_physical_pars_fragment.replace(
+  "reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseContribution ) * ( 1.0 - F );",
+  `{
+    float nlRaw = dot( geometryNormal, directLight.direction );
+    vec3 wrapW = vec3( 0.38, 0.2, 0.15 );
+    vec3 sss = clamp( ( vec3( nlRaw ) + wrapW ) / ( 1.0 + wrapW ), 0.0, 1.0 );
+    sss = mix( vec3( saturate( nlRaw ) ), sss * sss * ( 1.0 + wrapW * 0.6 ), 0.65 );
+    reflectedLight.directDiffuse += sss * directLight.color * BRDF_Lambert( material.diffuseContribution ) * ( 1.0 - F );
+  }`,
+);
+
+/** The directional-light loop, with each light scaled by its baked visibility. */
+const SKIN_LIGHTS_BEGIN = ShaderChunk.lights_fragment_begin.replace(
+  "getDirectionalLightInfo( directionalLight, directLight );",
+  "getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= lightVis( UNROLLED_LOOP_INDEX );",
+);
+if (process.env.NODE_ENV !== "production" && (SKIN_DIRECT === ShaderChunk.lights_physical_pars_fragment || SKIN_LIGHTS_BEGIN === ShaderChunk.lights_fragment_begin)) {
+  console.warn("[skin] three.js shader chunks changed — skin lighting patches not applied");
+}
 
 /**
  * Physically based skin with appearance controls injected into three's
@@ -27,12 +52,15 @@ export function createSkinMaterial(map: Texture, normalMap: Texture | null, skin
     map,
     normalMap: normalMap ?? undefined,
     normalScale: new Vector2(0.55, 0.55),
-    roughness: 0.52,
+    roughness: 0.5,
     metalness: 0,
-    specularIntensity: 0.55,
-    sheen: 0.35,
-    sheenRoughness: 0.55,
+    specularIntensity: 0.5,
+    sheen: 0.3,
+    sheenRoughness: 0.5,
     sheenColor: new Color("#ffcdb8"),
+    // Second, sharper specular lobe: the thin oil layer on real skin.
+    clearcoat: 0.14,
+    clearcoatRoughness: 0.34,
   }) as SkinMaterial;
 
   const uniforms: SkinUniforms = {
@@ -50,12 +78,30 @@ export function createSkinMaterial(map: Texture, normalMap: Texture | null, skin
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute vec4 aMask;\nvarying vec4 vMask;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMask = aMask;");
+      .replace(
+        "#include <common>",
+        "#include <common>\nattribute vec4 aMask;\nattribute vec4 aLightVis;\nattribute float aSkinAO;\nvarying vec4 vMask;\nvarying vec4 vLightVis;\nvarying float vSkinAO;",
+      )
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvMask = aMask;\nvLightVis = aLightVis;\nvSkinAO = aSkinAO;");
     shader.fragmentShader = shader.fragmentShader
+      .replace("#include <lights_physical_pars_fragment>", SKIN_DIRECT)
+      // Baked visibility of each studio light: groom shadows + the head's own soft shadows.
+      .replace("#include <lights_fragment_begin>", SKIN_LIGHTS_BEGIN)
+      .replace(
+        "#include <aomap_fragment>",
+        `#include <aomap_fragment>
+        reflectedLight.indirectDiffuse *= vSkinAO;
+        reflectedLight.indirectSpecular *= mix( 1.0, vSkinAO, 0.85 );`,
+      )
       .replace(
         "#include <common>",
         `#include <common>
+        varying vec4 vLightVis;
+        varying float vSkinAO;
+        float lightVis( const in int i ) {
+          float v = i == 0 ? vLightVis.x : i == 1 ? vLightVis.y : i == 2 ? vLightVis.z : i == 3 ? vLightVis.w : 1.0;
+          return 0.06 + 0.94 * v;
+        }
         varying vec4 vMask;
         uniform float uTan;
         uniform float uComplexion;
@@ -103,7 +149,7 @@ export function createSkinMaterial(map: Texture, normalMap: Texture | null, skin
         roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.92, uComplexion * (1.0 - vMask.w));`,
       );
   };
-  mat.customProgramCacheKey = () => "twinme-skin-v1";
+  mat.customProgramCacheKey = () => "twinme-skin-v2";
   return mat;
 }
 
