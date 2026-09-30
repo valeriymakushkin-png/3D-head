@@ -15,6 +15,9 @@ type Mode = "boot" | "create" | "studio";
 
 const TG_BOT = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
 
+/** Scan first when asked to, or when there is no twin to show (the demo counts as one). */
+const wantsCreate = (q: URLSearchParams) => !!q.get("create") || !(q.get("avatar") || q.get("demo") || getActiveAvatarId());
+
 /**
  * Telegram Mini App shell: native chrome integration (fullscreen, safe areas,
  * back button, haptics, no swipe-to-close while orbiting the head), initData
@@ -39,7 +42,7 @@ export function TgApp() {
         clearInterval(t);
         if (!w || !w.initData) {
           setOutside(true);
-          setMode(q.get("create") || !getActiveAvatarId() ? "create" : "studio");
+          setMode(wantsCreate(q) ? "create" : "studio");
           return;
         }
         w.ready();
@@ -84,7 +87,7 @@ export function TgApp() {
       } catch (e) {
         console.warn("[tg] auth failed", e);
       }
-      setMode(q.get("create") || !(q.get("avatar") || getActiveAvatarId()) ? "create" : "studio");
+      setMode(wantsCreate(q) ? "create" : "studio");
     })();
   }, [tg, q]);
 
@@ -104,7 +107,7 @@ export function TgApp() {
 
   // Created a twin → studio (CreateFlow navigates to /tg?avatar=…); "New scan" → /tg?create=1
   useEffect(() => {
-    if (q.get("avatar") && mode === "create") setMode("studio");
+    if ((q.get("avatar") || q.get("demo")) && mode === "create") setMode("studio");
     else if (q.get("create") && mode === "studio") setMode("create");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
@@ -136,7 +139,7 @@ export function TgApp() {
           <CreateFlow studioPath="/tg" />
         </div>
       ) : (
-        <StudioApp embedded key={q.get("avatar") ?? "active"} />
+        <StudioApp embedded key={q.get("demo") ? "demo" : (q.get("avatar") ?? "active")} />
       )}
     </>
   );

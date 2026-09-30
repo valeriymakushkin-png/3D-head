@@ -161,13 +161,14 @@ export async function reconstructInstantTwin(
 
   report("finish", 0.95, "Finishing your twin");
   const albedo = await new Promise<Blob>((res, rej) => bake.canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", 0.92));
+  const thumbnail = await faceThumbnail(frames[frontIdx]).catch(() => null);
   const record: InstantTwinRecord = {
     id: crypto.randomUUID(),
     createdAt: Date.now(),
     name: opts.name ?? "My twin",
     positions,
     albedo,
-    thumbnail: null,
+    thumbnail,
     rig,
     analysis,
     natural: hb.natural,
@@ -206,4 +207,28 @@ function landmarkNormals(t: HeadAsset): Float32Array {
     out[i * 3 + 2] = nrm.getZ(best);
   }
   return out;
+}
+
+/** A small square crop of the face from the front photo, for the twin list (stays on the device). */
+function faceThumbnail(f: CaptureFrame, size = 160): Promise<Blob | null> {
+  const L = f.landmarks;
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity;
+  for (let i = 0; i < 468; i++) {
+    const x = L[i * 3] * f.width,
+      y = L[i * 3 + 1] * f.height;
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  const side = Math.max(x1 - x0, y1 - y0) * 1.35;
+  const cx = (x0 + x1) / 2,
+    cy = (y0 + y1) / 2 - side * 0.04;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  c.getContext("2d")!.drawImage(f.image, cx - side / 2, cy - side / 2, side, side, 0, 0, size, size);
+  return new Promise((res) => c.toBlob(res, "image/jpeg", 0.82));
 }

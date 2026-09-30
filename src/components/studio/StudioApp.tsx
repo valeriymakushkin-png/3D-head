@@ -14,6 +14,7 @@ import { cn } from "@/lib/cn";
 import { CompareHandle, GlowUpOverlay, useGlowUp } from "@/components/studio/GlowUp";
 import { PreviewRail } from "@/components/studio/PreviewRail";
 import { ExportSheet, Paywall } from "@/components/studio/Sheets";
+import { TwinsSheet } from "@/components/studio/TwinsSheet";
 import { StudioScene } from "@/components/studio/StudioScene";
 import { StyleDock } from "@/components/studio/StyleDock";
 import { StylistPanel } from "@/components/studio/StylistPanel";
@@ -21,6 +22,7 @@ import { TopBar } from "@/components/studio/TopBar";
 import { IconCamera, IconCompare, IconOrbit, IconReset } from "@/components/ui/icons";
 import { easeOut } from "@/components/ui/primitives";
 import { detectQuality, restoreLook, useStudio } from "@/store/studio";
+import { DEFAULT_LOOK } from "@/lib/avatar/look";
 
 /** Loads the active twin: ?avatar=<id> → last used → demo template. */
 async function loadActiveAsset(requested: string | null, demo: boolean): Promise<HeadAsset> {
@@ -69,8 +71,8 @@ export function StudioApp({ embedded = false }: { embedded?: boolean }) {
       .then((a) => {
         const s = useStudio.getState();
         s.setAsset(a);
-        const saved = restoreLook(a.id);
-        if (saved) useStudio.setState({ look: saved, past: [], future: [] });
+        // Each twin starts from its own saved look (or its natural one), never the previous twin's.
+        useStudio.setState({ look: restoreLook(a.id) ?? DEFAULT_LOOK, past: [], future: [] });
       })
       .catch((e) => useStudio.getState().setAsset(null, String(e)));
     const mq = window.matchMedia("(max-width: 767px)");
@@ -142,6 +144,7 @@ export function StudioApp({ embedded = false }: { embedded?: boolean }) {
         <GlowUpOverlay state={glow} />
         <StylistPanel />
         <ExportSheet />
+        <TwinsSheet />
         <Paywall />
       </div>
     </main>

@@ -131,3 +131,8 @@ export const IconTelegram = (p: P) => (
     />
   </svg>
 );
+export const IconTrash = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5.5M14 11v5.5" />
+  </Svg>
+);

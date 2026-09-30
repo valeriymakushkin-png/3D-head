@@ -9,7 +9,7 @@ export const CATEGORIES = ["hair", "beard", "color", "glasses", "skin", "accesso
 export type Category = (typeof CATEGORIES)[number];
 
 export type LookSource = "manual" | "stylist" | "glow_up" | "restore";
-export type Panel = "none" | "stylist" | "glowup" | "export" | "account" | "paywall";
+export type Panel = "none" | "stylist" | "glowup" | "export" | "account" | "paywall" | "twins";
 export type ViewId = "front" | "left" | "right" | "back" | "three_quarter";
 
 interface CompareState {

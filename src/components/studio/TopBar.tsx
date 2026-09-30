@@ -1,8 +1,11 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { avatarVault } from "@/lib/recon/storage";
+import { TwinAvatar } from "@/components/studio/TwinsSheet";
 import Link from "next/link";
-import { IconExport, IconRedo, IconSparkle, IconUndo, IconWand } from "@/components/ui/icons";
+import { IconChevron, IconExport, IconRedo, IconSparkle, IconUndo, IconWand } from "@/components/ui/icons";
 import { Wordmark, LogoMark } from "@/components/ui/Logo";
 import { Button, Kbd, easeOut } from "@/components/ui/primitives";
 import { useStudio } from "@/store/studio";
@@ -15,6 +18,21 @@ export function TopBar({ onGlowUp, hideBrand = false }: { onGlowUp: () => void; 
   const canRedo = useStudio((s) => s.future.length > 0);
   const asset = useStudio((s) => s.asset);
   const compare = useStudio((s) => s.compare);
+  // The current twin's face (saved at scan time) for the twins button.
+  const [thumb, setThumb] = useState<{ url: string; atlas: boolean } | null>(null);
+  useEffect(() => {
+    if (!asset || asset.kind === "template") return setThumb(null);
+    let url: string | null = null;
+    avatarVault
+      .get(asset.id)
+      .then((r) => {
+        if (r) setThumb({ url: (url = URL.createObjectURL(r.thumbnail ?? r.albedo)), atlas: !r.thumbnail });
+      })
+      .catch(() => undefined);
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [asset]);
 
   return (
     <motion.header
@@ -31,10 +49,15 @@ export function TopBar({ onGlowUp, hideBrand = false }: { onGlowUp: () => void; 
           </Link>
         )}
         {asset && (
-          <Link href={hideBrand ? "/tg?create=1" : "/create"} className="glass-soft hidden items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-[12px] text-mist-300 hover:text-mist-100 lg:flex">
-            <span className="size-5 rounded-full bg-[radial-gradient(circle_at_35%_30%,#d8b69b,#6b4c3b)]" />
-            {asset.kind === "template" ? "Demo twin · scan yours" : asset.kind === "hd" ? "HD twin" : "Instant twin"}
-          </Link>
+          <button
+            onClick={() => openPanel("twins")}
+            className="glass-soft flex items-center gap-2 rounded-full p-1 pr-2.5 text-[12px] text-mist-200 transition-colors hover:text-mist-50 lg:py-1.5 lg:pl-1.5 lg:pr-3"
+            aria-label="Your twins: switch, scan someone new or delete"
+          >
+            <TwinAvatar url={thumb?.url} atlas={thumb?.atlas} className="size-7 lg:size-6" />
+            <span className="hidden lg:inline">{asset.kind === "template" ? "Demo twin · scan yours" : asset.kind === "hd" ? "HD twin" : "My twin"}</span>
+            <IconChevron size={14} className="rotate-90 text-mist-400" />
+          </button>
         )}
       </div>
 

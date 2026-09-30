@@ -78,3 +78,24 @@ export function setActiveAvatarId(id: string | null) {
     /* storage unavailable (private mode): keep in memory only */
   }
 }
+
+/**
+ * Removes a twin from this device completely: the record, its saved looks and
+ * (best effort) its cloud copy. Returns the twin to open next, if any.
+ */
+export async function deleteTwin(id: string): Promise<InstantTwinRecord | null> {
+  const rec = await avatarVault.get(id).catch(() => undefined);
+  await avatarVault.delete(id);
+  try {
+    localStorage.removeItem(`twinme.look.${id}`);
+  } catch {
+    /* storage unavailable */
+  }
+  if (rec?.remoteId) {
+    const { apiFetch } = await import("@/lib/api/fetch");
+    apiFetch(`/api/avatars/${rec.remoteId}`, { method: "DELETE" }).catch(() => undefined);
+  }
+  const rest = await avatarVault.list();
+  if (getActiveAvatarId() === id) setActiveAvatarId(rest[0]?.id ?? null);
+  return rest[0] ?? null;
+}

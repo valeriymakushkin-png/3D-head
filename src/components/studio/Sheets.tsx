@@ -10,7 +10,7 @@ import { Button, easeOut } from "@/components/ui/primitives";
 import { useStudio } from "@/store/studio";
 import { openCheckout } from "@/lib/billing/client";
 
-function Sheet({ open, onClose, children, label }: { open: boolean; onClose: () => void; children: React.ReactNode; label: string }) {
+export function Sheet({ open, onClose, children, label }: { open: boolean; onClose: () => void; children: React.ReactNode; label: string }) {
   return (
     <AnimatePresence>
       {open && (
@@ -24,6 +24,8 @@ function Sheet({ open, onClose, children, label }: { open: boolean; onClose: () 
             transition={{ duration: 0.45, ease: easeOut }}
             onClick={(e) => e.stopPropagation()}
             className="glass relative m-2 w-[calc(100%-16px)] max-w-[520px] rounded-[30px] p-6 md:p-7"
+            // Near-opaque: a modal sits over the busy studio UI, and not every WebView blurs.
+            style={{ background: "linear-gradient(180deg, rgb(30 27 24 / 0.97), rgb(18 16 14 / 0.97))" }}
           >
             <button onClick={onClose} className="absolute right-4 top-4 text-mist-400 hover:text-mist-100" aria-label="Close">
               <IconClose size={18} />
