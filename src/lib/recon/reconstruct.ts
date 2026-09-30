@@ -159,7 +159,7 @@ export async function reconstructInstantTwin(
   await yield_();
   const tl = linearOf(template.skinRgb);
   const skinRatio = [0, 1, 2].map((c) => Math.min(2.5, Math.max(0.3, frontLin[c] / Math.max(1e-4, tl[c])))) as [number, number, number];
-  const bake = bakeTexture(geometry, views, template.albedo, skinRatio, opts.atlasSize ?? 2048);
+  const bake = bakeTexture(geometry, views, template.albedo, skinRatio, opts.atlasSize ?? 2048, jawPlane(F));
 
   // 5) analysis + rig in the new head's own frame
   report("analyze", 0.86, "Reading your hair, beard and skin tone");
@@ -228,6 +228,21 @@ export function skinCalibration(skin: [number, number, number], template: [numbe
   // keep the chroma change luminance-neutral
   const Lg = lum([skin[0] * g[0], skin[1] * g[1], skin[2] * g[2]]) / Lu;
   return [0, 1, 2].map((c) => (g[c] / Lg) * expo) as [number, number, number];
+}
+
+/** The jaw line as a plane through the chin and both jaw angles, normal pointing up into the face. */
+function jawPlane(F: ArrayLike<number>): [number, number, number, number] {
+  const p = (i: number) => [F[i * 3], F[i * 3 + 1], F[i * 3 + 2]];
+  const c = p(152),
+    a = p(172),
+    b = p(397);
+  const u = [a[0] - c[0], a[1] - c[1], a[2] - c[2]],
+    v = [b[0] - c[0], b[1] - c[1], b[2] - c[2]];
+  let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const l = Math.hypot(n[0], n[1], n[2]) || 1;
+  n = n.map((x) => x / l);
+  if (n[1] < 0) n = n.map((x) => -x);
+  return [n[0], n[1], n[2], n[0] * c[0] + n[1] * c[1] + n[2] * c[2]];
 }
 
 /** Template vertex normal nearest to each landmark (for visibility weights). */

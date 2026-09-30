@@ -42,7 +42,13 @@ export function scalpZones(p: HairParams, az: number, h: number) {
 /** Hair length (metres) at a scalp location for a style. */
 export function hairLengthAt(p: HairParams, az: number, h: number): number {
   const z = scalpZones(p, az, h);
-  const top = mix(p.topLength, p.frontLength, z.frontW);
+  let top = mix(p.topLength, p.frontLength, z.frontW);
+  if (p.flow === "forward") {
+    // A forward cut is shorter at the temples: the fringe lies on the forehead,
+    // it doesn't hang down the side of the face like sideburns.
+    const temple = smoothstep(0.78, 0.3, z.f) * (1 - smoothstep(0.35, 0.8, h));
+    top = mix(top, Math.min(top, Math.max(p.sideLength * 1.4, top * 0.45)), temple);
+  }
   let low = mix(p.sideLength, p.backLength, smoothstep(0.1, 0.9, z.b));
   low = mix(low, p.napeLength, z.napeW);
   if (p.fade > 0) {

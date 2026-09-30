@@ -292,7 +292,10 @@ export const HAIRSTYLE_PRESETS: Record<Exclude<HairstyleId, "natural">, HairPara
  */
 /** A cut measured from the photos (absolute lengths in metres); overrides the base preset. */
 export type NaturalShape = Partial<
-  Pick<HairParams, "topLength" | "frontLength" | "sideLength" | "backLength" | "napeLength" | "fade" | "fadeLow" | "fadeHigh" | "flow" | "gravity" | "messiness" | "lift" | "volume">
+  Pick<
+    HairParams,
+    "topLength" | "frontLength" | "sideLength" | "backLength" | "napeLength" | "fade" | "fadeLow" | "fadeHigh" | "flow" | "frontLift" | "gravity" | "messiness" | "lift" | "volume"
+  >
 >;
 
 export interface NaturalHair {

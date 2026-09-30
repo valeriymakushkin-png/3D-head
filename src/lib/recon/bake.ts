@@ -23,6 +23,7 @@ import {
   UnsignedByteType,
   Vector2,
   Vector3,
+  Vector4,
   WebGLRenderTarget,
   WebGLRenderer,
   AddEquation,
@@ -93,7 +94,9 @@ const depthFS = /* glsl */ `
 const accumVS = /* glsl */ `
   ${common}
   uniform mat3 uNrm;
+  uniform vec4 uJaw;
   attribute float aFeat;
+  varying float vJaw;
   varying vec3 vImg;
   varying vec3 vN;
   varying float vZ;
@@ -102,6 +105,7 @@ const accumVS = /* glsl */ `
     vec3 q = toImage(position);
     vImg = q;
     vFeat = aFeat;
+    vJaw = dot(position, uJaw.xyz) - uJaw.w;
     vN = uNrm * normal;
     vZ = zNorm(q.z);
     gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
@@ -117,6 +121,7 @@ const accumFS = /* glsl */ `
   uniform float uFeatureKeep;
   uniform float uSH[9];
   uniform float uDelight;
+  varying float vJaw;
   varying vec3 vImg;
   varying vec3 vN;
   varying float vZ;
@@ -132,7 +137,9 @@ const accumFS = /* glsl */ `
     float edge = smoothstep(0.0, 0.04, min(min(t.x, 1.0 - t.x), min(t.y, 1.0 - t.y)));
     // Eyes and mouth come from one photo only: blending blinks and smiles ghosts.
     float feat = mix(1.0, uFeatureKeep, vFeat);
-    float w = vis * facing * facing * facing * facing * seg * edge * uWeight * feat;
+    // Below the jaw line the photo is mostly shadow and collar: let the fill take over.
+    float neck = smoothstep(-0.035, -0.008, vJaw);
+    float w = vis * facing * facing * facing * facing * seg * edge * uWeight * feat * neck;
     vec3 c = texture2D(uPhoto, t).rgb * uGain;
     if (uDelight > 0.5) {
       // Divide out the room's light (relative to camera-facing skin); partial
@@ -192,6 +199,8 @@ export function bakeTexture(
   templateAlbedo: Texture,
   skinRatio: [number, number, number],
   size = 2048,
+  /** Plane of the jaw line (unit normal pointing up into the face, offset): x·n − d. */
+  jaw?: [number, number, number, number],
 ): BakeResult {
   const renderer = new WebGLRenderer({ antialias: false, preserveDrawingBuffer: false });
   renderer.setPixelRatio(1);
@@ -233,6 +242,7 @@ export function bakeTexture(
     uWeight: { value: 1 },
     uFeatureKeep: { value: 1 },
     uSH: { value: new Array(9).fill(0) as number[] },
+    uJaw: { value: new Vector4(0, 1, 0, -1) },
     uDelight: { value: 0 },
   };
   const depthMat = new ShaderMaterial({
@@ -256,6 +266,7 @@ export function bakeTexture(
     blendDstAlpha: OneFactor,
   });
 
+  if (jaw) U.uJaw.value.set(...jaw);
   const pos = geometry.getAttribute("position");
   for (const v of views) {
     residAttr.array.set(v.residual);

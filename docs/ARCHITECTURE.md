@@ -44,12 +44,31 @@
 | | **Instant Twin** (default, free) | **HD Twin** (Pro) |
 |---|---|---|
 | Where | In the browser (WebGL2 + MediaPipe WASM) | GPU worker (Modal L4, PyTorch3D) |
-| Input | 7 guided angles / 5–15 photos / 15 s video | same frames, uploaded encrypted |
-| Geometry | Template head (scan) → ridge-affine + Gaussian-RBF warp through 468 fused landmarks | FLAME fitted jointly to all views (landmarks + silhouette + photometric) |
-| Texture | 2K atlas, projected from every view with visibility, facing³, skin-segmentation weights and per-view exposure gain | 2K atlas, SH-delit, Laplacian multi-band blended, per-vertex albedo fill |
+| Input | Face-ID-style guided scan (7 pose bins) / 5–15 photos / 15 s video | same frames, uploaded encrypted |
+| Geometry | Template head (scan) → lightly regularised affine + Gaussian-RBF warp through 468 fused landmarks | FLAME fitted jointly to all views (landmarks + silhouette + photometric) |
+| Texture | 2K atlas, projected from every view with visibility, facing⁴, skin-segmentation weights, per-view exposure gain, SH de-lighting and skin calibration | 2K atlas, SH-delit, Laplacian multi-band blended, per-vertex albedo fill |
 | Time | 5–15 s on a phone | 40–90 GPU-s, async, Telegram notification |
 | Privacy | Photos never leave the device | Photos hard-deleted ≤ 48 h |
 | Cost to us | $0 | ≈ $0.012 per twin (L4 @ ~$0.80/h) |
+
+**Guided scan.** A light screen (it doubles as a soft box for the face) with a
+round camera view: first "look straight" (the front view is taken once the
+face is centred, level and still), then "roll your head in a circle" while a
+ring of 72 ticks fills in every direction covered. Frames are binned by head
+pose and the sharpest per bin is kept; the headline names the open part of
+the ring or the exact pose a missing view needs.
+
+**Likeness details.** Width and height of the face follow the photos (the
+template prior is light; a guard falls back when a tilted frame would squash
+or mirror the depth). Each photo's lighting is fitted as order-2 spherical
+harmonics of the surface normal on the skin and divided out, and the skin is
+calibrated towards the template's albedo range — exposure only part-way,
+because a dim room and darker skin look alike to a camera. "Your hair"
+measures the fringe from the brows up (the tracker's top-of-face point sits
+on a fringe), and hair over the temples and ears: a fringe gets its measured
+cut, other hair keeps the nearest preset with its real sides (no fade when
+the temples are covered). Note that a selfie at arm's length makes a face
+~10 % narrower than it is; the twin shows the true proportions.
 
 Why: the "aha" (seeing *yourself* in 3D with a new haircut) must happen before
 sign-up and before paying. Doing it on-device gives zero marginal cost, zero

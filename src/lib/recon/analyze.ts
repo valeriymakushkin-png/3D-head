@@ -2,7 +2,7 @@
 
 import type { BeardId } from "@/lib/avatar/look";
 import type { NaturalHair } from "@/lib/hair/params";
-import { rgbToHex } from "@/lib/hair/params";
+import { HAIRSTYLE_PRESETS, rgbToHex } from "@/lib/hair/params";
 import { LIPS_OUTER, FACE_OVAL } from "@/lib/head/rig";
 import { SEG_CLASSES, getSegmenter } from "@/lib/recon/mediapipe";
 import type { CaptureFrame } from "@/lib/recon/types";
@@ -100,29 +100,33 @@ function inPoly(x: number, y: number, pts: Array<[number, number]>) {
   return c;
 }
 
-/** Mean sRGB of skin pixels in small patches around landmarks. */
-export function meanSkinRgb(s: SegmentedFrame, landmarkIds = [50, 280, 101, 330, 151, 9]): [number, number, number] | null {
+/**
+ * Typical skin colour (sRGB): the per-channel median of skin pixels in small
+ * patches across the face — forehead, nose, cheeks, chin — so neither flushed
+ * cheeks nor a shadowed side decide the tone.
+ */
+export function meanSkinRgb(s: SegmentedFrame, landmarkIds = [151, 9, 108, 337, 6, 50, 280, 101, 330, 205, 425, 199]): [number, number, number] | null {
   const f = s.frame;
   const r = Math.max(3, Math.round((ly(f, 152) - ly(f, 10)) * 0.03));
-  let R = 0,
-    G = 0,
-    B = 0,
-    n = 0;
+  const R: number[] = [],
+    G: number[] = [],
+    B: number[] = [];
   for (const id of landmarkIds) {
     const cx = Math.round(lx(f, id)),
       cy = Math.round(ly(f, id));
-    for (let y = cy - r; y <= cy + r; y++)
-      for (let x = cx - r; x <= cx + r; x++) {
+    for (let y = cy - r; y <= cy + r; y += 2)
+      for (let x = cx - r; x <= cx + r; x += 2) {
         if (x < 0 || y < 0 || x >= f.width || y >= f.height) continue;
         const i = y * f.width + x;
         if (s.categories[i] !== SEG_CLASSES.faceSkin) continue;
-        R += s.pixels[i * 4];
-        G += s.pixels[i * 4 + 1];
-        B += s.pixels[i * 4 + 2];
-        n++;
+        R.push(s.pixels[i * 4]);
+        G.push(s.pixels[i * 4 + 1]);
+        B.push(s.pixels[i * 4 + 2]);
       }
   }
-  return n > 20 ? [R / n, G / n, B / n] : null;
+  if (R.length < 20) return null;
+  const med = (v: number[]) => v.sort((a, b) => a - b)[v.length >> 1];
+  return [med(R), med(G), med(B)];
 }
 
 export function linearOf(rgb: [number, number, number]): [number, number, number] {
@@ -265,24 +269,47 @@ export function estimateHairAndBeard(front: SegmentedFrame, sides: SegmentedFram
   // Medium hair (a fringe, covered temples): describe the actual cut instead
   // of snapping to the nearest preset, whose faded sides would bare the
   // temples and the skin behind the ears.
-  if (scalpCoverage >= 0.25 && base !== "long" && (cut.fringe > 0.3 || cut.temple > 0.3)) {
+  const sideCut = {
+    sideLength: 0.012 + 0.02 * cut.temple + 0.025 * cut.ears,
+    backLength: 0.03 + 0.02 * Math.max(cut.temple, cut.ears),
+    napeLength: 0.012 + 0.012 * Math.max(cut.temple, cut.ears),
+    fade: Math.max(0, Math.min(0.6, 0.7 - 1.4 * cut.temple - cut.ears)),
+  };
+  if (scalpCoverage >= 0.25 && base !== "long" && cut.fringe > 0.3) {
+    // A fringe no preset has: hair falling forward to the brows.
     const tall = Math.min(1, hairHeight / 0.25);
-    natural.base = cut.fringe > 0.3 ? "french_crop" : "textured_crop";
+    natural.base = "french_crop";
     natural.lengthScale = 1;
     natural.shape = {
-      topLength: 0.048 + 0.022 * tall + 0.006 * cut.fringe,
-      frontLength: cut.fringe > 0.3 ? 0.045 + 0.03 * cut.fringe : 0.05,
-      sideLength: 0.012 + 0.02 * cut.temple + 0.025 * cut.ears,
-      backLength: 0.03 + 0.02 * Math.max(cut.temple, cut.ears),
-      napeLength: 0.012 + 0.012 * Math.max(cut.temple, cut.ears),
-      fade: Math.max(0, Math.min(0.6, 0.7 - 1.4 * cut.temple - cut.ears)),
-      flow: cut.fringe > 0.3 ? "forward" : "side",
+      ...sideCut,
+      topLength: 0.045 + 0.018 * tall + 0.005 * cut.fringe,
+      frontLength: 0.045 + 0.03 * cut.fringe,
+      flow: "forward",
       gravity: 0.25 + 0.2 * cut.fringe,
       messiness: 0.35 + 0.2 * tall,
       lift: 0.3,
       volume: Math.min(0.45, Math.max(0.28, 0.1 + hairHeight * 1.2)),
     };
     lengthClass = "medium";
+  } else if (scalpCoverage >= 0.25 && base !== "long" && base !== "buzz_cut") {
+    const preset = HAIRSTYLE_PRESETS[base];
+    const shape: NonNullable<NaturalHair["shape"]> = {};
+    if (Math.max(cut.temple, cut.ears) > 0.3) {
+      // The preset's style on top, but the sides as they really are (no fade when the temples are covered).
+      // (shape lengths are scaled by lengthScale later, like the preset's: sides and nape by its root)
+      const r = Math.sqrt(lengthScale);
+      Object.assign(shape, {
+        sideLength: Math.max(preset.sideLength, sideCut.sideLength / r),
+        backLength: Math.max(preset.backLength, sideCut.backLength / lengthScale),
+        napeLength: Math.max(preset.napeLength, sideCut.napeLength / r),
+        fade: Math.min(preset.fade, sideCut.fade),
+      });
+    }
+    if (cut.fringe < 0.12 && preset.flow === "forward" && preset.topLength * lengthScale > 0.03) {
+      // A clear forehead: the hair is worn up and back, it must not fall over it.
+      Object.assign(shape, { flow: "back", frontLift: 0.35, lift: 0.4 });
+    }
+    if (Object.keys(shape).length) natural.shape = shape;
   }
   if (process.env.NODE_ENV !== "production") console.info("[likeness] hair", { hairHeight, scalpCoverage, fringe, sideBottom, cut, natural });
 
