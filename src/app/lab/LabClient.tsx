@@ -152,6 +152,7 @@ function LabScene({ recon = false }: { recon?: boolean }) {
       const withNat = (a: HeadAsset): HeadAsset => (nat ? { ...a, natural: { ...a.natural, ...nat } } : a);
       const template = await loadTemplateHead();
       if (!recon) return setAsset(withNat(template));
+      if (q.get("reconlab")) (globalThis as unknown as { __RECON_LAB__?: unknown }).__RECON_LAB__ = JSON.parse(q.get("reconlab")!);
       const t0 = performance.now();
       // /lab?mode=recon&src=photos: real photos injected by a test harness as
       // window.__PHOTOS__ (data URLs), through the same import path as uploads.

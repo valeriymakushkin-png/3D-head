@@ -35,8 +35,13 @@ export async function reconstructInstantTwin(
 
   report("segment", 0.02, "Preparing your scan");
   const template = await loadTemplateHead();
-  // Compare like with like: the template's landmarks as this pipeline measures them.
-  const T = template.rig.fitLandmarks ?? template.rig.landmarks;
+  // Compare like with like: the template's landmarks as this pipeline measures
+  // them from a full session (side views move the outline points; a frontal
+  // photo alone places them like the template's own straight-on rig).
+  const sideViews = frames.filter((f) => Math.abs(f.pose.yaw) > 20).length;
+  const sideShare = Math.min(1, sideViews / 2);
+  const fit = template.rig.fitLandmarks;
+  const T = fit ? template.rig.landmarks.map((v, i) => v + (fit[i] - v) * sideShare) : template.rig.landmarks;
   const templatePositions = template.geometry.getAttribute("position").array as Float32Array;
   const templateNormals = templateLandmarkNormals(template);
 
@@ -79,7 +84,8 @@ export async function reconstructInstantTwin(
   // The landmarks barely see the face's outline (jaw, cheeks): fit it to the
   // frontal photo's segmentation edge.
   let outline: ReturnType<typeof fitFaceOutline> = null;
-  for (let pass = 0; pass < 2; pass++) {
+  const lab = (globalThis as unknown as { __RECON_LAB__?: { noOutline?: boolean } }).__RECON_LAB__ ?? {};
+  for (let pass = 0; pass < (lab.noOutline ? 0 : 2); pass++) {
     const front = cams[frontIdx];
     const o = fitFaceOutline({
       positions: all,
@@ -91,6 +97,8 @@ export async function reconstructInstantTwin(
       seg: segs[frontIdx],
       F,
       ears: template.rig.ears,
+      // the second pass only refines (a misread edge must not compound)
+      limit: pass === 0 ? [0.93, 1.08] : [0.98, 1.02],
     });
     if (!o) break;
     all = o.positions;
@@ -190,7 +198,7 @@ export async function reconstructInstantTwin(
       gain,
       shading,
       // The front photo owns the face; the others fill the sides and under the chin.
-      weight: k === frontIdx ? 2.5 : Math.max(0.35, f.quality.score),
+      weight: k === frontIdx ? 4 : Math.max(0.35, f.quality.score),
       featureKeep: k === frontIdx ? 1 : 0.02,
       // side photos: the face only (see the bake), ~1.5 cm in front of the tragus and forward
       reachZ: k === frontIdx ? undefined : Math.max(F[234 * 3 + 2], F[454 * 3 + 2]) + 0.012,
@@ -207,9 +215,6 @@ export async function reconstructInstantTwin(
         const q = cams[k].project(warp.positions[i * 3], warp.positions[i * 3 + 1], warp.positions[i * 3 + 2]);
         pts.push(q[0] + v.residual[i * 2], -(q[1] + v.residual[i * 2 + 1]), ears.has(i) ? 1 : 0);
       }
-      const A = cams[k].affine;
-      const rn = (r: number) => Math.hypot(A[r * 4], A[r * 4 + 1], A[r * 4 + 2]).toFixed(0);
-      console.info(`[likeness] cam ${k} rows ${rn(0)} ${rn(1)} ${rn(2)} focal ${cams[k].focal.toFixed(0)} zEar ${(A[8] * warp.positions[(template.rig.ears?.[0] ?? 0) * 3] + A[9] * warp.positions[(template.rig.ears?.[0] ?? 0) * 3 + 1] + A[10] * warp.positions[(template.rig.ears?.[0] ?? 0) * 3 + 2] + A[11]).toFixed(0)}`);
       dbg.push({ img: frames[k].image.toDataURL("image/jpeg", 0.8), w: frames[k].width, h: frames[k].height, pts });
     });
   }
@@ -292,7 +297,7 @@ export function skinCalibration(skin: [number, number, number], template: [numbe
 }
 
 const OVAL_SET = new Set(FACE_OVAL);
-const CAM_RIDGE = () => (globalThis as unknown as { __CAMRIDGE__?: number }).__CAMRIDGE__ ?? 468 * 2e-4;
+const CAM_RIDGE = 468 * 2e-4;
 
 /** Per-photo camera: weak perspective fitted to the landmarks, then perspective-corrected. */
 function fitViewCamera(f: CaptureFrame, X: Float64Array | Float32Array, fusionView: { weights: Float64Array; sim: { s: number; R: number[]; t: number[] } }, m: number) {
@@ -317,7 +322,7 @@ function fitViewCamera(f: CaptureFrame, X: Float64Array | Float32Array, fusionVi
   //   image = c + (A·x − c) / (1 − z/f),  z = camera depth of x (px).
   // Depth comes from the camera's own rotation (the tracker's depth is
   // compressed), with z = 0 at the landmarks' centroid, where the scale holds.
-  const focal = ((globalThis as unknown as { __FOCAL__?: number }).__FOCAL__ ?? PHONE_FOCAL) * Math.max(f.width, f.height);
+  const focal = (f.focal ?? PHONE_FOCAL) * Math.max(f.width, f.height);
   const cx = f.width / 2,
     cy = -f.height / 2;
   let wsum = 0;
@@ -342,7 +347,7 @@ function fitViewCamera(f: CaptureFrame, X: Float64Array | Float32Array, fusionVi
     A[11] = -(z[0] * cen[0] + z[1] * cen[1] + z[2] * cen[2]);
     return A;
   };
-  let affine = rigidDepth(fitAffine(Fl, Pl, wl, CAM_RIDGE(), prior));
+  let affine = rigidDepth(fitAffine(Fl, Pl, wl, CAM_RIDGE, prior));
   const Pc = Float64Array.from(Pl);
   for (let it = 0; it < 5; it++) {
     for (let i = 0; i < 468; i++) {
@@ -351,7 +356,7 @@ function fitViewCamera(f: CaptureFrame, X: Float64Array | Float32Array, fusionVi
       Pc[i * 3] = cx + (Pl[i * 3] - cx) * w;
       Pc[i * 3 + 1] = cy + (Pl[i * 3 + 1] - cy) * w;
     }
-    affine = rigidDepth(fitAffine(Fl, Pc, wl, CAM_RIDGE(), prior));
+    affine = rigidDepth(fitAffine(Fl, Pc, wl, CAM_RIDGE, prior));
   }
   const project = (x: number, y: number, z: number) => {
     const q = applyAffine(affine, x, y, z);

@@ -138,8 +138,8 @@ export function writeMasks(
 
 /**
  * 1 inside the face oval (frontal projection, in front of the ears), 0 outside,
- * with a soft ~6 mm edge — and 0 again in a band just under the top of the oval,
- * where a hairline or a fringe's edge usually sits.
+ * with a soft ~6 mm edge — and 0 above the brows, where a hairline, a fringe
+ * or stray wisps may lie on the forehead.
  */
 export function faceOvalMask(positions: ArrayLike<number>, landmarks: ArrayLike<number>): Float32Array {
   const n = positions.length / 3;
@@ -147,7 +147,8 @@ export function faceOvalMask(positions: ArrayLike<number>, landmarks: ArrayLike<
   const rig = { landmarks } as Pick<HeadRig, "landmarks">;
   const oval = poly(rig as HeadRig, FACE_OVAL);
   const zFront = Math.min(landmarks[234 * 3 + 2], landmarks[454 * 3 + 2]) - 0.005;
-  const yTop = landmarks[10 * 3 + 1];
+  // Above the brows (a fringe, wisps, the hairline) only skin-like samples count.
+  const browTop = Math.max(landmarks[105 * 3 + 1], landmarks[334 * 3 + 1], landmarks[66 * 3 + 1], landmarks[296 * 3 + 1]);
   for (let i = 0; i < n; i++) {
     const x = positions[i * 3],
       y = positions[i * 3 + 1],
@@ -155,7 +156,7 @@ export function faceOvalMask(positions: ArrayLike<number>, landmarks: ArrayLike<
     if (z < zFront - 0.01) continue;
     const d = edgeDistance(x, y, oval);
     const sd = inside(x, y, oval) ? d : -d;
-    out[i] = smoothstep(-0.003, 0.006, sd) * smoothstep(zFront - 0.01, zFront, z) * smoothstep(yTop - 0.004, yTop - 0.016, y);
+    out[i] = smoothstep(-0.003, 0.006, sd) * smoothstep(zFront - 0.01, zFront, z) * smoothstep(browTop + 0.014, browTop + 0.005, y);
   }
   return out;
 }

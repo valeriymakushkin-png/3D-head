@@ -2,17 +2,18 @@ import type { SegmentedFrame } from "@/lib/recon/analyze";
 import { SEG_CLASSES } from "@/lib/recon/mediapipe";
 
 /**
- * Face outline from the frontal photo's segmentation.
+ * Jaw outline from the frontal photo's segmentation.
  *
  * The tracker's 478 landmarks describe the face's *features* well but its
  * *outline* poorly: its contour points are regressed towards an average face,
  * so a wide jaw, full cheeks or a narrow chin barely move them (in tests, a
  * jaw 14 mm wider moved them by < 1 mm). The segmentation, though, sees the
  * actual edge of the face against the background or the neck. Per image row,
- * between the cheekbones and the chin, we compare that edge with the edge of
+ * from the mouth corners to the chin, we compare that edge with the edge of
  * the sculpted head projected through the same camera, and widen or narrow
- * the head's sides to match — features (nose, mouth, eyes) stay where the
- * landmarks put them.
+ * the jaw to match — conservatively (gated against the tracker's contour,
+ * limited to −7…+8 %, smoothed), because a misread edge (an ear, a beard, a
+ * collar) must never balloon a face.
  */
 export interface OutlineFit {
   positions: Float32Array;
@@ -40,7 +41,10 @@ export function fitFaceOutline(opts: {
   /** Fused landmarks in head space (same frame as positions). */
   F: ArrayLike<number>;
   ears?: number[];
+  /** Per-row correction limits (a refining pass should only nudge). */
+  limit?: [number, number];
 }): OutlineFit | null {
+  const [kMin, kMax] = opts.limit ?? [0.93, 1.08];
   const { positions, index, project, seg, F } = opts;
   const f = seg.frame;
   const W = f.width,
@@ -50,13 +54,32 @@ export function fitFaceOutline(opts: {
   const [x152, y152] = L(152);
   const faceH = y152 - L(10)[1];
   if (!(faceH > 40)) return null;
-  // From just below the nose to the chin: higher up, the ears (skin in the
-  // segmentation, masked out of the head's outline) would bias the widths.
-  const y0 = Math.round(L(2)[1] + faceH * 0.02),
+  // The jaw: from the mouth corners down to the chin. Higher up the ears
+  // (skin in the segmentation; on many faces the lobes reach the mouth) would
+  // read as cheek.
+  const y0 = Math.round((L(61)[1] + L(291)[1]) / 2),
     y1 = Math.round(y152 - faceH * 0.03);
   const rows = y1 - y0 + 1;
   if (rows < 20) return null;
   const midAt = (y: number) => x168 + ((x152 - x168) * (y - y168)) / Math.max(1, y152 - y168);
+
+  // The tracker's face contour, per side, as a polyline in the image.
+  const OVAL_R = [10, 109, 67, 103, 54, 21, 162, 127, 234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152];
+  const OVAL_L = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152];
+  const contourHalfWidth = (dir: number, y: number, mid: number) => {
+    let best = -1;
+    for (const ids of [OVAL_R, OVAL_L]) {
+      for (let k = 0; k + 1 < ids.length; k++) {
+        const [xa, ya] = L(ids[k]);
+        const [xb, yb] = L(ids[k + 1]);
+        if ((ya - y) * (yb - y) > 0 || ya === yb) continue;
+        const x = xa + ((xb - xa) * (y - ya)) / (yb - ya);
+        if (Math.sign(x - mid) !== dir) continue;
+        best = Math.max(best, Math.abs(x - mid));
+      }
+    }
+    return best;
+  };
 
   // 1) observed half-widths per row (left = image left)
   const cat = seg.categories;
@@ -90,7 +113,12 @@ export function fitFaceOutline(opts: {
         }
       }
       if (blocked || edge < 0) continue;
-      (dir < 0 ? obsL : obsR)[r] = Math.abs(edge - mid);
+      // Gate against the tracker's (smoothed, averaged) outline: an edge far
+      // beyond it is an ear, a beard or a collar, not the jaw.
+      const ref = contourHalfWidth(dir, y, mid);
+      const half = Math.abs(edge - mid);
+      if (ref > 0 && (half > ref * 1.12 || half < ref * 0.88)) continue;
+      (dir < 0 ? obsL : obsR)[r] = half;
     }
   }
 
@@ -99,6 +127,13 @@ export function fitFaceOutline(opts: {
   const ear = new Uint8Array(n);
   for (const v of opts.ears ?? []) if (v < n) ear[v] = 1;
   const zBack = Math.min(F[234 * 3 + 2], F[454 * 3 + 2]) - 0.015;
+  let zEarFront = zBack - 0.03,
+    yEarLow = Infinity;
+  for (const v of opts.ears ?? []) {
+    if (v >= n) continue;
+    zEarFront = Math.max(zEarFront, positions[v * 3 + 2]);
+    yEarLow = Math.min(yEarLow, positions[v * 3 + 1]);
+  }
   const yTopHead = F[168 * 3 + 1];
   const px = new Float32Array(n),
     py = new Float32Array(n);
@@ -139,7 +174,7 @@ export function fitFaceOutline(opts: {
   const ratio = (obs: Float32Array, mod: Float32Array) => {
     const raw = new Float32Array(rows).fill(NaN);
     for (let r = 0; r < rows; r++) if (obs[r] > 0 && mod[r] > faceH * 0.15) raw[r] = obs[r] / mod[r] / OUTLINE_BIAS;
-    const sigma = Math.max(2, faceH * 0.035);
+    const sigma = Math.max(2, faceH * 0.06);
     const out = new Float32Array(rows).fill(NaN);
     let valid = 0;
     for (let r = 0; r < rows; r++) {
@@ -152,7 +187,7 @@ export function fitFaceOutline(opts: {
         w += g;
       }
       if (w > 0.8) {
-        out[r] = Math.min(1.15, Math.max(0.88, s / w));
+        out[r] = Math.min(kMax, Math.max(kMin, s / w));
         valid++;
       }
     }
@@ -189,16 +224,19 @@ export function fitFaceOutline(opts: {
   for (let i = 0; i < n; i++) {
     if (ear[i]) continue;
     const r = py[i] - y0;
-    // taper up to the cheekbones (which the landmarks already place) and below the chin
-    const band = smooth(-faceH * 0.18, 0, r) * (1 - smooth(rows, rows + faceH * 0.15, r));
+    // taper up towards the cheekbones (which the landmarks already place) and below the chin
+    const band = smooth(-faceH * 0.22, 0, r) * (1 - smooth(rows, rows + faceH * 0.15, r));
     if (band <= 0) continue;
     const side = px[i] < midAt(py[i]) ? -1 : 1;
     const k = side < 0 ? at(left.out, right.out, r) : at(right.out, left.out, r);
     const half = Math.max(1, side < 0 ? modL[Math.min(rows - 1, Math.max(0, Math.round(r)))] : modR[Math.min(rows - 1, Math.max(0, Math.round(r)))]);
     // lateral: the cheeks and jaw move, the nose and mouth don't
-    const lat = smooth(0.3, 0.85, Math.abs(px[i] - midAt(py[i])) / half);
-    // depth: fade out behind the face (the ears and the back of the head stay)
-    const depth = smooth(zBack - 0.05, zBack - 0.01, positions[i * 3 + 2]);
+    const lat = smooth(0.15, 1.0, Math.abs(px[i] - midAt(py[i])) / half);
+    // depth: only in front of the ears (they, and the back of the head, stay put;
+    // scaling the skin around an ear but not the ear would tear it)
+    const z = positions[i * 3 + 2];
+    const besideEar = smooth(yEarLow - 0.012, yEarLow, positions[i * 3 + 1]);
+    const depth = besideEar * smooth(zEarFront + 0.004, zEarFront + 0.02, z) + (1 - besideEar) * smooth(zBack - 0.05, zBack - 0.01, z);
     const s = 1 + (k - 1) * band * lat * depth;
     out[i * 3] = xMid + (positions[i * 3] - xMid) * s;
   }

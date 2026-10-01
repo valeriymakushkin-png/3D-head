@@ -5,6 +5,7 @@ import { getFaceLandmarker, poseFromMatrix } from "@/lib/recon/mediapipe";
 import { POSE_TARGETS, binForPose, measureFrame, scoreQuality } from "@/lib/recon/poses";
 import type { CaptureFrame } from "@/lib/recon/types";
 import { decodeImage } from "@/lib/media/decode";
+import { focalFraction, readFocal35 } from "@/lib/media/exif";
 
 const MAX_SIDE = 1600;
 
@@ -53,10 +54,13 @@ export async function framesFromPhotos(files: File[], onEach?: (done: number, to
   const rejected: string[] = [];
   for (const [i, file] of files.entries()) {
     try {
-      const img = await decodeImage(file);
+      const [img, f35] = await Promise.all([decodeImage(file), readFocal35(file)]);
       const canvas = snapshot(img.source, img.width, img.height);
       img.close();
       const f = toFrame(detector.detect(canvas), canvas, "upload");
+      // Unknown optics (no EXIF, or a crop of a bigger photo): assume a mild,
+      // longer-than-selfie perspective rather than arm's length.
+      if (f) f.focal = f35 ? focalFraction(f35, canvas.width, canvas.height) : 1.3;
       if (f) frames.push(f);
       else rejected.push(file.name);
     } catch {
@@ -101,6 +105,7 @@ export async function framesFromVideo(file: File, onProgress?: (p: number) => vo
     const canvas = snapshot(video, video.videoWidth, video.videoHeight);
     ts += 150;
     const f = toFrame(detector.detectForVideo(canvas, ts), canvas, "video");
+    if (f) f.focal = 1; // a phone video, front or back camera: in between
     if (f) out.push(f);
     onProgress?.(t / duration);
   }

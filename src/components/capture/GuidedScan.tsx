@@ -16,6 +16,8 @@ type Stage = "align" | "circle" | "done";
 
 /** Frames fed to the landmarker are downscaled (landmarks are normalised, so capture stays full-res). */
 const FEED_WIDTH = 480;
+/** Phone front cameras: ~23–26 mm equivalent → focal ≈ 0.7 × the long side of a 4:3 frame. */
+const FRONT_CAMERA_FOCAL = 0.7;
 const TICKS = 72;
 /** Head rotation that completes the ring: wide left/right (the cheeks and ears need it), gentle up/down. */
 const YAW_FULL = 44;
@@ -131,8 +133,9 @@ export function GuidedScan({
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "user",
-            width: { ideal: 1280 },
-            height: { ideal: 960 },
+            // As sharp as the front camera streams (texture detail around the eyes needs it).
+            width: { ideal: 1920 },
+            height: { ideal: 1440 },
           },
           audio: false,
         });
@@ -204,6 +207,7 @@ export function GuidedScan({
         const image = snapshot(v, v.videoWidth, v.videoHeight);
         const frame = toFrame(res, image, "guided");
         if (!frame || frame.quality.issues.includes("blurry")) return false;
+        frame.focal = FRONT_CAMERA_FOCAL;
         frame.bin = bin;
         const isNew = !bins.current.has(bin);
         if (mergeFrame(bins.current, frame) && isNew) {

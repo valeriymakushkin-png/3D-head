@@ -12,6 +12,8 @@ export interface CaptureFrame {
   pose: { yaw: number; pitch: number; roll: number };
   quality: FrameQuality;
   source: "guided" | "upload" | "video";
+  /** Camera focal length as a fraction of the image's long side, when known (EXIF, or the phone's front camera). */
+  focal?: number;
   /** Pose bin this frame fills (see poses.ts). */
   bin: PoseBinId;
 }

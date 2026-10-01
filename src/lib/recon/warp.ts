@@ -24,7 +24,13 @@ export function warpTemplate(
   // can also shear, which tilts the whole head (a face "looking down") when
   // the fused depth is noisy.
   const sim = similarityAlign(T, F);
-  const affine = axisScaledSimilarity(T, F, sim);
+  const lab = (globalThis as unknown as { __RECON_LAB__?: { similarityOnly?: boolean } }).__RECON_LAB__ ?? {};
+  const affine = lab.similarityOnly
+    ? (() => {
+        const { s, R, t } = sim;
+        return [s * R[0], s * R[1], s * R[2], t[0], s * R[3], s * R[4], s * R[5], t[1], s * R[6], s * R[7], s * R[8], t[2]];
+      })()
+    : axisScaledSimilarity(T, F, sim);
 
   const resid = new Float64Array(N * 3);
   let rss = 0;

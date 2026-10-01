@@ -169,7 +169,7 @@ const accumFS = /* glsl */ `
       // Only where the fit had data (surfaces facing the camera); elsewhere the
       // extrapolated lighting is a guess and would tint or blow out texels.
       float support = smoothstep(0.2, 0.5, n.z);
-      c /= pow(clamp(shade, 0.6, 1.6), 0.85 * support);
+      c /= pow(clamp(shade, 0.7, 1.35), 0.75 * support);
     }
     // Outside the face oval (scalp line, temples, ears, neck) only skin belongs
     // in the atlas: a lock of hair at the hairline or the background beside a
@@ -178,7 +178,10 @@ const accumFS = /* glsl */ `
     float ls = dot(uSkin, vec3(0.2126, 0.7152, 0.0722));
     vec2 ch = c.rg / max(1e-4, c.r + c.g + c.b);
     vec2 cs = uSkin.rg / max(1e-4, uSkin.r + uSkin.g + uSkin.b);
-    float skinLike = exp(-dot(ch - cs, ch - cs) / (0.045 * 0.045)) * smoothstep(0.3, 0.55, lc / ls) * (1.0 - smoothstep(2.0, 3.0, lc / ls));
+    // Hair is darker than skin, background is off-hue; a shine on the skin is
+    // brighter and whiter, and stays.
+    float hueOk = mix(exp(-dot(ch - cs, ch - cs) / (0.05 * 0.05)), 1.0, smoothstep(1.1, 1.4, lc / ls));
+    float skinLike = hueOk * smoothstep(0.45, 0.72, lc / ls) * (1.0 - smoothstep(2.6, 3.4, lc / ls));
     w *= mix(skinLike, 1.0, vOval);
     gl_FragColor = vec4(c * w, w);
   }

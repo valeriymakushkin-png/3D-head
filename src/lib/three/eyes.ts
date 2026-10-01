@@ -147,11 +147,15 @@ export function buildEyes(setup: EyeSetup): Group {
       .replace(
         "#include <color_fragment>",
         `#include <color_fragment>
-        diffuseColor.rgb *= 1.0 - 0.55 * smoothstep(0.0, 0.5, vEyeN.y);
-        diffuseColor.rgb *= mix(0.55, 1.0, smoothstep(0.1, 0.75, vEyeN.z));`,
+        // Upper lid and lashes shade the top; the corners curve away into shadow;
+        // a photographed white of the eye is never paper white.
+        diffuseColor.rgb *= 1.0 - 0.6 * smoothstep(-0.12, 0.45, vEyeN.y);
+        diffuseColor.rgb *= mix(0.5, 1.0, smoothstep(0.1, 0.75, vEyeN.z));
+        diffuseColor.rgb *= mix(0.62, 1.0, 1.0 - smoothstep(0.25, 0.7, abs(vEyeN.x)));
+        diffuseColor.rgb *= vec3(0.86, 0.8, 0.77);`,
       );
   };
-  mat.customProgramCacheKey = () => "twinme-eye-v2";
+  mat.customProgramCacheKey = () => "twinme-eye-v3";
   // Dark, fleshy socket behind each eyeball: any gap at the corners reads as
   // the caruncle in shadow instead of a hole into the head.
   const socketGeo = new SphereGeometry(setup.radius * 1.18, 24, 16);
