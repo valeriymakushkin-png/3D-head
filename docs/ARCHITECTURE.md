@@ -58,17 +58,29 @@ ring of 72 ticks fills in every direction covered. Frames are binned by head
 pose and the sharpest per bin is kept; the headline names the open part of
 the ring or the exact pose a missing view needs.
 
-**Likeness details.** Width and height of the face follow the photos (the
-template prior is light; a guard falls back when a tilted frame would squash
-or mirror the depth). Each photo's lighting is fitted as order-2 spherical
-harmonics of the surface normal on the skin and divided out, and the skin is
-calibrated towards the template's albedo range — exposure only part-way,
-because a dim room and darker skin look alike to a camera. "Your hair"
-measures the fringe from the brows up (the tracker's top-of-face point sits
-on a fringe), and hair over the temples and ears: a fringe gets its measured
-cut, other hair keeps the nearest preset with its real sides (no fade when
-the temples are covered). Note that a selfie at arm's length makes a face
-~10 % narrower than it is; the twin shows the true proportions.
+**Likeness details** (measured against a real head scan in the lab: the scan,
+optionally morphed — wider/narrower jaw, nose, cheeks — goes through a
+synthetic selfie session and the twin is scored in mm against it):
+
+- *Calibrated landmarks.* The tracker's landmarks are biased (its outline
+  points sit ~15 % inside the jaw seen from 7 close views); the template's
+  `fitLandmarks` are the template measured by this same pipeline, so sculpting
+  compares like with like (blended by how many side views were captured).
+- *Proportions without shear*: similarity + one scale per axis (a free affine
+  can tilt the whole head).
+- *Jaw outline* from the frontal segmentation (mouth corners → chin), gated
+  against the tracker's contour and limited to −7…+8 %.
+- *Cameras* are fitted to the model's surface landmarks with a rigid depth
+  axis and perspective (focal from the phone's front camera or EXIF); side
+  photos texture the face only, the fill covers ears and the back of the head.
+- *Texture*: each photo's lighting (order-2 SH of the normal) is divided out
+  gently; skin calibrated towards the template's albedo range (exposure only
+  part-way — a dim room and darker skin look alike); outside the face oval and
+  above the brows only skin-like samples are kept (no hair bands at the
+  hairline); below the jaw line the fill takes over.
+- *Hair*: the fringe is measured from the brows up, plus hair over the temples
+  and ears; ears are masked out of hair roots and scalp tint and the hairline
+  wraps around them; a bald scalp gets no stubble.
 
 Why: the "aha" (seeing *yourself* in 3D with a new haircut) must happen before
 sign-up and before paying. Doing it on-device gives zero marginal cost, zero
